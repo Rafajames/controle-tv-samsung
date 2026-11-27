@@ -41,9 +41,9 @@ class MainActivity : Activity() {
     private companion object {
         const val SPEECH_COMMAND = 1; const val SPEECH_TEXT = 2
         const val ACTION_INSTALLED = "com.rafajames.controletv.INSTALLED"
-        /** Repositório público só com os APKs (o do código é privado). */
-        const val RELEASES = "https://github.com/Rafajames/controle-tv-releases/releases"
-        const val RELEASES_API = "https://api.github.com/repos/Rafajames/controle-tv-releases/releases/latest"
+        /** Versões publicadas pelo GitHub Actions (o repositório precisa ser público). */
+        const val RELEASES = "https://github.com/Rafajames/controle-tv-samsung/releases"
+        const val RELEASES_API = "https://api.github.com/repos/Rafajames/controle-tv-samsung/releases/latest"
     }
 
     private lateinit var tv: SamsungTv
@@ -485,7 +485,7 @@ class MainActivity : Activity() {
                 c.setRequestProperty("Accept", "application/vnd.github+json")
                 when (val code = c.responseCode) {
                     200 -> Unit
-                    404 -> error("nenhuma versão publicada encontrada (404)")
+                    404 -> error("o repositório está privado ou sem versões publicadas (404)")
                     403, 429 -> error("o GitHub limitou os acessos por agora ($code). Tente daqui a pouco")
                     else -> error("o GitHub respondeu $code")
                 }
