@@ -71,6 +71,7 @@ class MainActivity : Activity() {
         }
         tv.onState = { st -> runOnUiThread { refreshPill(st) } }
         tv.onIcon = { runOnUiThread { scheduleRenderApps() } }
+        tv.onLaunchFailed = { name -> runOnUiThread { relink(name) } }
         ir = IrRemote(this)
         appsRow = findViewById(R.id.apps)
         wire(findViewById(R.id.root))
@@ -678,6 +679,20 @@ class MainActivity : Activity() {
                     else -> { list.removeAt(i); saveApps(list) }
                 }
             }.show()
+    }
+
+    /** O código do app não existe nesta TV (404): oferece escolher o certo na lista da TV. */
+    private fun relink(name: String) {
+        val list = loadApps()
+        val i = list.indexOfFirst { it.name == name }
+        if (i < 0 || isFinishing) return
+        AlertDialog.Builder(this).setTitle("$name não abriu")
+            .setMessage("A TV disse que esse app não está instalado com esse código. Quer escolher o app certo na lista da TV?")
+            .setPositiveButton("Escolher") { _, _ ->
+                pickFromTv { n, id -> list[i] = list[i].copy(id = id); saveApps(list); status.text = "$name agora abre \"$n\"" }
+            }
+            .setNegativeButton("Remover atalho") { _, _ -> list.removeAt(i); saveApps(list) }
+            .setNeutralButton("Fechar", null).show()
     }
 
     private fun addApp() = pickFromTv { name, id -> saveApps(loadApps().apply { add(Shortcut(name, id)) }) }
