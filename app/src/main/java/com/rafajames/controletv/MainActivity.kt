@@ -41,6 +41,9 @@ class MainActivity : Activity() {
     private companion object {
         const val SPEECH_COMMAND = 1; const val SPEECH_TEXT = 2
         const val ACTION_INSTALLED = "com.rafajames.controletv.INSTALLED"
+        /** Repositório público só com os APKs (o do código é privado). */
+        const val RELEASES = "https://github.com/Rafajames/controle-tv-releases/releases"
+        const val RELEASES_API = "https://api.github.com/repos/Rafajames/controle-tv-releases/releases/latest"
     }
 
     private lateinit var tv: SamsungTv
@@ -475,19 +478,25 @@ class MainActivity : Activity() {
     private fun checkUpdate(silent: Boolean = false) {
         if (!silent) status.text = "Verificando atualização…"
         thread {
+            var why = ""
             val latest = runCatching {
-                val c = URL("https://api.github.com/repos/Rafajames/controle-tv-samsung/releases/latest")
-                    .openConnection() as HttpURLConnection
+                val c = URL(RELEASES_API).openConnection() as HttpURLConnection
                 c.connectTimeout = 8000; c.readTimeout = 8000
                 c.setRequestProperty("Accept", "application/vnd.github+json")
+                when (val code = c.responseCode) {
+                    200 -> Unit
+                    404 -> error("nenhuma versão publicada encontrada (404)")
+                    403, 429 -> error("o GitHub limitou os acessos por agora ($code). Tente daqui a pouco")
+                    else -> error("o GitHub respondeu $code")
+                }
                 JSONObject(c.inputStream.bufferedReader().use { it.readText() })
                     .getString("tag_name").removePrefix("v").toLong()
-            }.getOrNull()
+            }.onFailure { why = it.message ?: it.javaClass.simpleName }.getOrNull()
             runOnUiThread {
                 if (isFinishing) return@runOnUiThread
                 prefs.edit().putLong("lastUpdateCheck", System.currentTimeMillis()).apply()
                 when {
-                    latest == null -> if (!silent) info("Atualização", "Não consegui verificar. Confira a internet e tente de novo.")
+                    latest == null -> if (!silent) info("Atualização", "Não consegui verificar.\n\nMotivo: $why")
                     latest <= myVersion -> if (!silent) info("Atualização", "Você já tem a versão mais nova ($myVersion).")
                     else -> AlertDialog.Builder(this)
                         .setTitle("Versão $latest disponível")
@@ -520,7 +529,7 @@ class MainActivity : Activity() {
         val progress = AlertDialog.Builder(this).setTitle("Atualizando para a versão $ver").setView(box).setCancelable(false).show()
         thread {
             val error = runCatching {
-                val c = URL("https://github.com/Rafajames/controle-tv-samsung/releases/download/v$ver/controle-tv.apk")
+                val c = URL("$RELEASES/download/v$ver/controle-tv.apk")
                     .openConnection() as HttpURLConnection
                 c.connectTimeout = 10000; c.readTimeout = 20000
                 val total = c.contentLengthLong
@@ -571,8 +580,8 @@ class MainActivity : Activity() {
 
     /** Se o instalador interno falhar (alguns celulares bloqueiam), oferece o navegador. */
     private fun updateFailed(ver: Long?, why: String) {
-        val url = if (ver != null) "https://github.com/Rafajames/controle-tv-samsung/releases/download/v$ver/controle-tv.apk"
-            else "https://github.com/Rafajames/controle-tv-samsung/releases/latest/download/controle-tv.apk"
+        val url = if (ver != null) "$RELEASES/download/v$ver/controle-tv.apk"
+            else "$RELEASES/latest/download/controle-tv.apk"
         AlertDialog.Builder(this).setTitle("Não deu para atualizar")
             .setMessage("Motivo: $why\n\nQuer baixar pelo navegador?")
             .setPositiveButton("Abrir navegador") { _, _ -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
