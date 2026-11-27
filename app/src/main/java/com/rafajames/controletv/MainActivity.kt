@@ -7,7 +7,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
-import android.view.HapticFeedbackConstants
+import android.animation.AnimatorInflater
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.widget.CheckBox
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -19,6 +23,7 @@ import java.net.URL
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -48,8 +53,18 @@ class MainActivity : Activity() {
         appsRow = findViewById(R.id.apps)
         wire(findViewById(R.id.root))
         findViewById<View>(R.id.settings).setOnClickListener { showSettings() }
-        findViewById<View>(R.id.power).setOnClickListener { buzz(it); if (irMode) ir.send("KEY_POWER") else tv.power() }
+        findViewById<View>(R.id.power).setOnClickListener { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
+        val numpad = findViewById<View>(R.id.numpad)
+        numpad.visibility = if (prefs.getBoolean("numpad", false)) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.dialpad).setOnClickListener {
+            buzz()
+            val show = numpad.visibility != View.VISIBLE
+            numpad.visibility = if (show) View.VISIBLE else View.GONE
+            prefs.edit().putBoolean("numpad", show).apply()
+            if (show) findViewById<ScrollView>(R.id.scroll).let { sv -> sv.post { sv.smoothScrollTo(0, numpad.bottom) } }
+        }
         modeBtn.setOnClickListener {
+            buzz()
             if (!ir.available) { status.text = "Este celular não tem infravermelho"; return@setOnClickListener }
             irMode = !irMode; applyMode()
         }
@@ -63,7 +78,8 @@ class MainActivity : Activity() {
     }
 
     private fun applyMode() {
-        modeBtn.text = if (irMode) "📡 IR" else "📶 Wi-Fi"
+        modeBtn.text = if (irMode) "IR" else "Wi-Fi"
+        modeBtn.setCompoundDrawablesRelativeWithIntrinsicBounds(if (irMode) R.drawable.ic_ir else R.drawable.ic_wifi, 0, 0, 0)
         if (irMode) { tv.disconnect(); status.text = "Infravermelho: aponte o celular para a TV" }
         else tv.connect()
     }
@@ -78,18 +94,18 @@ class MainActivity : Activity() {
         if (v is ViewGroup) for (i in 0 until v.childCount) wire(v.getChildAt(i))
         val key = v.tag as? String ?: return
         if (key in repeatKeys) holdToRepeat(v, key)
-        else v.setOnClickListener { buzz(it); press(key) }
+        else v.setOnClickListener { buzz(); press(key) }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun holdToRepeat(v: View, key: String) {
         val repeat = object : Runnable {
-            override fun run() { press(key); handler.postDelayed(this, 120) }
+            override fun run() { buzz(Buzz.TICK); press(key); handler.postDelayed(this, 120) }
         }
         v.setOnTouchListener { view, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    view.isPressed = true; buzz(view); press(key)
+                    view.isPressed = true; buzz(); press(key)
                     handler.postDelayed(repeat, 450)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -100,7 +116,26 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun buzz(v: View) = v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+    // ---------- Vibração ----------
+    // Usa o motor de vibração direto (não depende da "vibração ao toque" do sistema).
+
+    private enum class Buzz { CLICK, TICK, HEAVY }
+    private val vibrator by lazy { getSystemService(Vibrator::class.java) }
+    private var hapticOn: Boolean
+        get() = prefs.getBoolean("haptic", true)
+        set(v) { prefs.edit().putBoolean("haptic", v).apply() }
+
+    private fun buzz(kind: Buzz = Buzz.CLICK) {
+        val vib = vibrator ?: return
+        if (!hapticOn || !vib.hasVibrator()) return
+        val effect = if (Build.VERSION.SDK_INT >= 29) VibrationEffect.createPredefined(when (kind) {
+            Buzz.CLICK -> VibrationEffect.EFFECT_CLICK
+            Buzz.TICK -> VibrationEffect.EFFECT_TICK
+            Buzz.HEAVY -> VibrationEffect.EFFECT_HEAVY_CLICK
+        }) else VibrationEffect.createOneShot(when (kind) { Buzz.CLICK -> 18L; Buzz.TICK -> 8L; Buzz.HEAVY -> 45L },
+            VibrationEffect.DEFAULT_AMPLITUDE)
+        vib.vibrate(effect)
+    }
 
     private fun showSettings() {
         val input = EditText(this).apply {
@@ -108,11 +143,17 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_PHONE
             setText(tv.ip ?: "")
         }
+        val vibrate = CheckBox(this).apply { text = "Vibrar ao tocar nos botões"; isChecked = hapticOn }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
+            addView(input); addView(vibrate)
+        }
         AlertDialog.Builder(this)
-            .setTitle("IP da TV")
-            .setMessage("Na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
-            .setView(input)
+            .setTitle("Configurações")
+            .setMessage("IP da TV — na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
+            .setView(box)
             .setPositiveButton("Salvar") { _, _ ->
+                hapticOn = vibrate.isChecked
                 val ip = input.text.toString().trim()
                 if (ip.isNotEmpty()) { tv.setIp(ip); tv.connect() }
             }
@@ -162,6 +203,7 @@ class MainActivity : Activity() {
         setTextColor(Color.WHITE)
         textSize = 15f
         background = getDrawable(R.drawable.btn)
+        stateListAnimator = AnimatorInflater.loadStateListAnimator(context, R.animator.press)
         setPadding(dp(18), 0, dp(18), 0)
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(52))
             .apply { setMargins(dp(5), dp(5), dp(5), dp(5)) }
@@ -171,11 +213,11 @@ class MainActivity : Activity() {
         appsRow.removeAllViews()
         loadApps().forEachIndexed { i, (name, id) ->
             appsRow.addView(chip(name).apply {
-                setOnClickListener { buzz(it); tv.launch(name, id) }
+                setOnClickListener { buzz(); tv.launch(name, id) }
                 setOnLongClickListener { editApp(i); true }
             })
         }
-        appsRow.addView(chip("＋").apply { setOnClickListener { addApp() } })
+        appsRow.addView(chip("＋").apply { setOnClickListener { buzz(); addApp() } })
     }
 
     private fun editApp(i: Int) {
