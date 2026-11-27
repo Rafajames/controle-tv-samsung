@@ -28,11 +28,20 @@
         <item name="android:paddingTop">10dp</item>
         <item name="android:drawablePadding">2dp</item>
     </style>
+    <!-- Linha de 5 botões pequenos (Voltar, Home, Teclado, Voz, Enter) -->
+    <style name="SmallBtn" parent="LabelBtn">
+        <item name="android:layout_height">58dp</item>
+        <item name="android:layout_margin">3dp</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+    </style>
     <!-- Botão redondo só com ícone -->
     <style name="RoundBtn">
-        <item name="android:layout_width">64dp</item>
-        <item name="android:layout_height">64dp</item>
-        <item name="android:layout_margin">5dp</item>
+        <item name="android:layout_width">60dp</item>
+        <item name="android:layout_height">60dp</item>
+        <item name="android:layout_margin">4dp</item>
         <item name="android:background">@drawable/btn_round</item>
         <item name="android:scaleType">center</item>
         <item name="android:stateListAnimator">@animator/press</item>
@@ -64,7 +73,7 @@
     <style name="Pill">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_weight">1</item>
-        <item name="android:layout_height">176dp</item>
+        <item name="android:layout_height">148dp</item>
         <item name="android:layout_margin">5dp</item>
         <item name="android:orientation">vertical</item>
         <item name="android:gravity">center_horizontal</item>

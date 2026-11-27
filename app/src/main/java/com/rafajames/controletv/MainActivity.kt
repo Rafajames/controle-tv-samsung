@@ -11,7 +11,8 @@ import android.animation.AnimatorInflater
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.widget.CheckBox
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.content.ActivityNotFoundException
 import android.speech.RecognizerIntent
 import android.view.KeyEvent
@@ -29,7 +30,6 @@ import java.net.URL
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,7 +43,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var ir: IrRemote
     private lateinit var modeBtn: Button
-    private lateinit var appsRow: LinearLayout
+    private lateinit var apps1: LinearLayout
+    private lateinit var apps2: LinearLayout
     private val prefs by lazy { getSharedPreferences("tv", MODE_PRIVATE) }
     private var irMode: Boolean
         get() = ir.available && prefs.getBoolean("ir", true)
@@ -58,27 +59,17 @@ class MainActivity : Activity() {
         tv = SamsungTv(this) { msg -> runOnUiThread { status.text = msg } }
         ir = IrRemote(this)
         modeBtn = findViewById(R.id.mode)
-        appsRow = findViewById(R.id.apps)
+        apps1 = findViewById(R.id.apps1)
+        apps2 = findViewById(R.id.apps2)
         wire(findViewById(R.id.root))
         findViewById<View>(R.id.settings).setOnClickListener { showSettings() }
         findViewById<View>(R.id.power).setOnClickListener { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
-        val numpad = findViewById<View>(R.id.numpad)
-        numpad.visibility = if (prefs.getBoolean("numpad", false)) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.dialpad).setOnClickListener {
-            buzz()
-            val show = numpad.visibility != View.VISIBLE
-            numpad.visibility = if (show) View.VISIBLE else View.GONE
-            prefs.edit().putBoolean("numpad", show).apply()
-            if (show) findViewById<ScrollView>(R.id.scroll).let { sv -> sv.post { sv.smoothScrollTo(0, numpad.bottom) } }
-        }
+        findViewById<View>(R.id.dialpad).setOnClickListener { buzz(); showNumpad() }
+        fitDpad()
         modeBtn.setOnClickListener {
             buzz()
             if (!ir.available) { status.text = "Este celular não tem infravermelho"; return@setOnClickListener }
             irMode = !irMode; applyMode()
-        }
-        findViewById<Button>(R.id.update).apply {
-            text = "Verificar atualização (versão $myVersion)"
-            setOnClickListener { checkUpdate() }
         }
         findViewById<View>(R.id.keyboard).setOnClickListener { buzz(); showKeyboard() }
         voiceButton(findViewById(R.id.voice))
@@ -135,20 +126,19 @@ class MainActivity : Activity() {
 
     private enum class Buzz { CLICK, TICK, HEAVY }
     private val vibrator by lazy { getSystemService(Vibrator::class.java) }
-    private var hapticOn: Boolean
-        get() = prefs.getBoolean("haptic", true)
-        set(v) { prefs.edit().putBoolean("haptic", v).apply() }
+    /** 0 = desligada, 1 = fraca, 2 = média, 3 = forte. */
+    private var hapticLevel: Int
+        get() = prefs.getInt("hapticLevel", if (prefs.getBoolean("haptic", true)) 2 else 0)
+        set(v) { prefs.edit().putInt("hapticLevel", v).apply() }
 
-    private fun buzz(kind: Buzz = Buzz.CLICK) {
+    // Pulso com duração e força definidas: o "clique" padrão do Android é fraco demais em alguns celulares.
+    private fun buzz(kind: Buzz = Buzz.CLICK, level: Int = hapticLevel) {
         val vib = vibrator ?: return
-        if (!hapticOn || !vib.hasVibrator()) return
-        val effect = if (Build.VERSION.SDK_INT >= 29) VibrationEffect.createPredefined(when (kind) {
-            Buzz.CLICK -> VibrationEffect.EFFECT_CLICK
-            Buzz.TICK -> VibrationEffect.EFFECT_TICK
-            Buzz.HEAVY -> VibrationEffect.EFFECT_HEAVY_CLICK
-        }) else VibrationEffect.createOneShot(when (kind) { Buzz.CLICK -> 18L; Buzz.TICK -> 8L; Buzz.HEAVY -> 45L },
-            VibrationEffect.DEFAULT_AMPLITUDE)
-        vib.vibrate(effect)
+        if (level !in 1..3 || !vib.hasVibrator()) return
+        val base = longArrayOf(0, 15, 25, 40)[level]
+        val ms = when (kind) { Buzz.CLICK -> base; Buzz.TICK -> maxOf(8L, base / 2); Buzz.HEAVY -> base * 2 }
+        val amp = if (vib.hasAmplitudeControl()) intArrayOf(0, 110, 190, 255)[level] else VibrationEffect.DEFAULT_AMPLITUDE
+        vib.vibrate(VibrationEffect.createOneShot(ms, amp))
     }
 
     private fun showSettings() {
@@ -157,24 +147,53 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_PHONE
             setText(tv.ip ?: "")
         }
-        val vibrate = CheckBox(this).apply { text = "Vibrar ao tocar nos botões"; isChecked = hapticOn }
+        val levels = listOf("Desligada", "Fraca", "Média", "Forte")
+        val vibrate = RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
+            levels.forEachIndexed { i, t -> addView(RadioButton(context).apply { id = 100 + i; text = t; textSize = 13f }) }
+            check(100 + hapticLevel)
+        }
+        val chosen = { vibrate.checkedRadioButtonId - 100 }
+        val test = Button(this).apply { text = "Testar vibração"; isAllCaps = false; setOnClickListener { buzz(level = chosen()) } }
+        val update = Button(this).apply { text = "Verificar atualização (versão $myVersion)"; isAllCaps = false }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
-            addView(input); addView(vibrate)
+            addView(input)
+            addView(TextView(context).apply { text = "Vibração ao tocar"; setPadding(0, dp(12), 0, 0) })
+            addView(vibrate); addView(test); addView(update)
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Configurações")
             .setMessage((tv.model?.let { "TV: $it · voz: " + when (tv.voiceSupport) { true -> "sim"; false -> "não"; null -> "?" } + "\n\n" } ?: "") +
                 "IP da TV — na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
             .setView(box)
             .setPositiveButton("Salvar") { _, _ ->
-                hapticOn = vibrate.isChecked
+                hapticLevel = chosen()
                 val ip = input.text.toString().trim()
                 if (ip.isNotEmpty()) { tv.setIp(ip); tv.connect() }
             }
             .setNeutralButton("Procurar TV") { _, _ -> scan() }
             .setNegativeButton("Cancelar", null)
             .show()
+        update.setOnClickListener { dialog.dismiss(); checkUpdate() }
+    }
+
+    /** Painel de números por cima do controle (não estica a tela). */
+    private fun showNumpad() {
+        val pad = layoutInflater.inflate(R.layout.numpad, null)
+        wire(pad)
+        val dialog = AlertDialog.Builder(this).setView(pad).create()
+        pad.findViewById<View>(R.id.numClose).setOnClickListener { buzz(); dialog.dismiss() }
+        dialog.show()
+    }
+
+    /** O direcional diminui se a tela for baixa, para tudo caber sem rolar. */
+    private fun fitDpad() {
+        val pad = findViewById<View>(R.id.dpad)
+        findViewById<View>(R.id.dpadBox).addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val s = ((bottom - top - dp(8)) / dp(264).toFloat()).coerceIn(0.5f, 1f)
+            pad.scaleX = s; pad.scaleY = s
+        }
     }
 
     private fun scan() {
@@ -348,23 +367,44 @@ class MainActivity : Activity() {
         this.text = text
         isAllCaps = false
         setTextColor(Color.WHITE)
-        textSize = 15f
+        textSize = 12f
+        isSingleLine = true
+        ellipsize = android.text.TextUtils.TruncateAt.END
         background = getDrawable(R.drawable.btn)
         stateListAnimator = AnimatorInflater.loadStateListAnimator(context, R.animator.press)
-        setPadding(dp(18), 0, dp(18), 0)
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(52))
-            .apply { setMargins(dp(5), dp(5), dp(5), dp(5)) }
+        setPadding(dp(4), 0, dp(4), 0)
+        minHeight = 0; minimumHeight = 0; minWidth = 0; minimumWidth = 0
+        layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) }
     }
 
+    /** Grade fixa de 8 lugares (4 + 4). Com mais de 7 apps, o último vira "Mais". */
     private fun renderApps() {
-        appsRow.removeAllViews()
-        loadApps().forEachIndexed { i, (name, id) ->
-            appsRow.addView(chip(name).apply {
+        apps1.removeAllViews(); apps2.removeAllViews()
+        val apps = loadApps()
+        val shown = if (apps.size <= 7) apps.size else 7
+        val cells = mutableListOf<View>()
+        apps.take(shown).forEachIndexed { i, (name, id) ->
+            cells += chip(name).apply {
                 setOnClickListener { buzz(); tv.launch(name, id) }
                 setOnLongClickListener { editApp(i); true }
-            })
+            }
         }
-        appsRow.addView(chip("＋").apply { setOnClickListener { buzz(); addApp() } })
+        cells += if (apps.size > 7) chip("Mais…").apply { setOnClickListener { buzz(); showAllApps() } }
+            else chip("＋").apply { setOnClickListener { buzz(); addApp() } }
+        while (cells.size < 8) cells += View(this).apply { layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) } }
+        cells.forEachIndexed { i, v -> (if (i < 4) apps1 else apps2).addView(v) }
+    }
+
+    private fun showAllApps() {
+        val apps = loadApps()
+        AlertDialog.Builder(this).setTitle("Apps")
+            .setItems(apps.map { it.first }.toTypedArray()) { _, w -> tv.launch(apps[w].first, apps[w].second) }
+            .setNeutralButton("Adicionar") { _, _ -> addApp() }
+            .setNegativeButton("Editar") { _, _ ->
+                AlertDialog.Builder(this).setTitle("Editar qual?")
+                    .setItems(apps.map { it.first }.toTypedArray()) { _, w -> editApp(w) }.show()
+            }
+            .show()
     }
 
     private fun editApp(i: Int) {

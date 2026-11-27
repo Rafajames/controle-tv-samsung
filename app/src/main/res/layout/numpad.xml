@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de números: abre por cima do controle -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent"
+    android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp" android:background="#121418">
+    <LinearLayout style="@style/Row">
+        <Button style="@style/Btn" android:tag="KEY_1" android:text="1" />
+        <Button style="@style/Btn" android:tag="KEY_2" android:text="2" />
+        <Button style="@style/Btn" android:tag="KEY_3" android:text="3" />
+    </LinearLayout>
+    <LinearLayout style="@style/Row">
+        <Button style="@style/Btn" android:tag="KEY_4" android:text="4" />
+        <Button style="@style/Btn" android:tag="KEY_5" android:text="5" />
+        <Button style="@style/Btn" android:tag="KEY_6" android:text="6" />
+    </LinearLayout>
+    <LinearLayout style="@style/Row">
+        <Button style="@style/Btn" android:tag="KEY_7" android:text="7" />
+        <Button style="@style/Btn" android:tag="KEY_8" android:text="8" />
+        <Button style="@style/Btn" android:tag="KEY_9" android:text="9" />
+    </LinearLayout>
+    <LinearLayout style="@style/Row">
+        <Button style="@style/Btn" android:id="@+id/numClose" android:text="Fechar" android:textSize="15sp" android:textColor="#B0BEC5" />
+        <Button style="@style/Btn" android:tag="KEY_0" android:text="0" />
+        <Button style="@style/Btn" android:tag="KEY_ENTER" android:text="OK" android:textSize="16sp" />
+    </LinearLayout>
+</LinearLayout>
