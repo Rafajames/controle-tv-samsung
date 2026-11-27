@@ -39,7 +39,7 @@
         <ImageButton android:id="@+id/search" style="@style/Glass" android:layout_marginStart="8dp"
             android:src="@drawable/ic_search" android:contentDescription="Apps da TV" />
         <ImageButton android:id="@+id/settings" style="@style/Glass" android:layout_marginStart="8dp"
-            android:src="@drawable/ic_more_vert" android:contentDescription="Configurações" />
+            android:src="@drawable/ic_gear" android:contentDescription="Configurações" />
     </LinearLayout>
 
     <!-- 3. Painel de volume e canal -->

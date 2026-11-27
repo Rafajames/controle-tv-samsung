@@ -193,37 +193,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Configurações › Aparência: tema, seguir o celular e cor de destaque (muda na hora). */
-    private fun showAppearance() {
-        val themes = RadioGroup(this).apply {
-            Themes.all.forEachIndexed { i, t ->
-                addView(RadioButton(context).apply { id = 300 + i; textSize = 15f; text = t.name + if (t.dark) " · escuro" else " · claro" })
-            }
-            check(300 + Themes.all.indexOfFirst { it.name == pal.name }.coerceAtLeast(0))
-        }
-        val auto = CheckBox(this).apply { text = "Seguir o tema do celular (branco de dia, Cristal à noite)"; isChecked = prefs.getBoolean("themeAuto", false) }
-        val accents = RadioGroup(this).apply {
-            Themes.accentNames.forEachIndexed { i, n -> addView(RadioButton(context).apply { id = 400 + i; text = n; textSize = 15f }) }
-            check(400 + prefs.getInt("accent", 0).coerceIn(0, 3))
-        }
-        themes.setOnCheckedChangeListener { _, id ->
-            prefs.edit().putString("theme", Themes.all[id - 300].name).putBoolean("themeAuto", false).apply()
-            auto.isChecked = false; applyTheme()
-        }
-        auto.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("themeAuto", on).apply(); applyTheme() }
-        accents.setOnCheckedChangeListener { _, id -> prefs.edit().putInt("accent", id - 400).apply(); applyTheme() }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
-            addView(TextView(context).apply { text = "Tema"; textSize = 13f })
-            addView(themes); addView(auto)
-            addView(TextView(context).apply { text = "Cor de destaque"; textSize = 13f; setPadding(0, dp(14), 0, 0) })
-            addView(accents)
-        }
-        AlertDialog.Builder(this).setTitle("Aparência")
-            .setView(android.widget.ScrollView(this).apply { addView(box) })
-            .setPositiveButton("Pronto", null).show()
-    }
-
     /** Apps da TV: grade com busca; tocar abre, segurar fixa no controle. */
     private fun showTvApps() {
         val p = pal
@@ -460,58 +429,180 @@ class MainActivity : Activity() {
         vib.vibrate(VibrationEffect.createOneShot(ms, amp))
     }
 
+    /** Configurações em tela cheia, no visual do tema: TV, Aparência, Controle e Sobre. Tudo muda na hora. */
     private fun showSettings() {
-        val input = EditText(this).apply {
-            hint = "Ex.: 192.168.0.15"
-            inputType = InputType.TYPE_CLASS_PHONE
-            setText(tv.ip ?: "")
+        val p = pal; val acc = accent; val d1 = dp(1)
+        val dlg = android.app.Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar)
+        val wrap = LinearLayout.LayoutParams.WRAP_CONTENT; val match = LinearLayout.LayoutParams.MATCH_PARENT
+        val bold = android.graphics.Typeface.DEFAULT_BOLD
+        val reopen = { dlg.dismiss(); showSettings() }
+        fun label(t: String) = TextView(this).apply {
+            text = t; textSize = 12f; setTextColor(p.muted); typeface = bold; letterSpacing = 0.06f; setPadding(dp(4), dp(18), 0, dp(8))
         }
-        val levels = listOf("Desligada", "Fraca", "Média", "Forte")
-        val vibrate = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
-            levels.forEachIndexed { i, t -> addView(RadioButton(context).apply { id = 100 + i; text = t; textSize = 13f }) }
-            check(100 + hapticLevel)
+        fun card() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = Themes.glass(p.panel, p.edge, dp(20).toFloat(), d1) }
+        fun divider(c: LinearLayout) = c.addView(View(this).apply { setBackgroundColor(p.edge) },
+            LinearLayout.LayoutParams(match, d1).apply { marginStart = dp(16) })
+        fun line(title: String, right: View?, click: (() -> Unit)? = null) = LinearLayout(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL; minimumHeight = dp(54); setPadding(dp(16), dp(6), dp(14), dp(6))
+            addView(TextView(context).apply { text = title; textSize = 15f; setTextColor(p.text) }, LinearLayout.LayoutParams(0, wrap, 1f))
+            right?.let { addView(it) }
+            if (click != null) setOnClickListener { buzz(); click() }
         }
-        val chosen = { vibrate.checkedRadioButtonId - 100 }
-        val test = Button(this).apply { text = "Testar vibração"; isAllCaps = false; setOnClickListener { buzz(level = chosen()) } }
-        val update = Button(this).apply { text = "Verificar atualização (versão $myVersion)"; isAllCaps = false }
-        // Diagnóstico: quantos apps a TV informou (sem lista, os atalhos usam códigos fixos)
-        val n = tv.installed.size
-        val tvApps = Button(this).apply {
-            isAllCaps = false
-            text = if (n > 0) "Ver apps da TV ($n · via ${tv.appsSource})"
-                else "Apps da TV: nenhum ainda (toque para procurar)" + (tv.lastError?.let { "\nErro da TV: $it" } ?: "")
+        fun note(t: String, color: Int = p.muted) = TextView(this).apply { text = t; textSize = 13f; setTextColor(color) }
+        fun toggle(key: String, def: Boolean = true, after: (Boolean) -> Unit = {}) = android.widget.Switch(this).apply {
+            isChecked = prefs.getBoolean(key, def)
+            thumbTintList = csl(Color.WHITE)
+            trackTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(acc, (p.muted and 0x00FFFFFF) or 0x66000000))
+            setOnCheckedChangeListener { _, on -> buzz(); prefs.edit().putBoolean(key, on).apply(); after(on) }
         }
-        val look = Button(this).apply { isAllCaps = false; text = "Aparência: ${pal.name}" }
-        val volKeys = CheckBox(this).apply { text = "Botões de volume do celular controlam a TV"; isChecked = prefs.getBoolean("volKeys", true) }
-        val notif = CheckBox(this).apply { text = "Volume e pausa na notificação (fora do app)"; isChecked = prefs.getBoolean("notif", true) }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
-            addView(input)
-            addView(TextView(context).apply { text = "Vibração ao tocar"; setPadding(0, dp(12), 0, 0) })
-            addView(vibrate); addView(test)
-            addView(look); addView(volKeys); addView(notif); addView(tvApps); addView(update)
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Configurações")
-            .setMessage((tv.model?.let { "TV: $it · voz: " + when (tv.voiceSupport) { true -> "sim"; false -> "não"; null -> "?" } + "\n\n" } ?: "") +
-                "IP da TV — na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
-            .setView(box)
-            .setPositiveButton("Salvar") { _, _ ->
-                hapticLevel = chosen()
-                prefs.edit().putBoolean("volKeys", volKeys.isChecked).putBoolean("notif", notif.isChecked).apply()
-                if (notif.isChecked && Build.VERSION.SDK_INT >= 33 &&
-                    checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9)
-                val ip = input.text.toString().trim()
-                if (ip.isNotEmpty()) { tv.setIp(ip); tv.connect() }
+
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(14), dp(18), dp(28)) }
+
+        // Topo: voltar + título
+        box.addView(LinearLayout(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(ImageButton(context).apply {
+                setImageResource(R.drawable.ic_chevron_down); rotation = 90f; imageTintList = csl(p.text)
+                background = Themes.pressable(p, p.btn, -1f, d1); contentDescription = "Voltar"
+                if (p.raised) elevation = dp(3).toFloat()
+                setOnClickListener { buzz(); dlg.dismiss() }
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            addView(TextView(context).apply { text = "Configurações"; textSize = 22f; typeface = bold; setTextColor(p.text); setPadding(dp(14), 0, 0, 0) })
+        })
+
+        // TV conectada
+        val tvSub = when {
+            irMode -> "Modo infravermelho"
+            tv.connected -> "Conectada · ${tv.ip} · Wi‑Fi"
+            tv.ip != null -> "Desconectada · ${tv.ip}"
+            else -> "Nenhuma TV encontrada ainda"
+        } + (tv.voiceSupport?.let { if (it) " · voz" else "" } ?: "")
+        box.addView(LinearLayout(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(12), dp(12), dp(12))
+            background = Themes.glass(p.panel, p.edge, dp(20).toFloat(), d1)
+            addView(android.widget.ImageView(context).apply {
+                setImageResource(R.drawable.ic_input); imageTintList = csl(acc); scaleType = android.widget.ImageView.ScaleType.CENTER
+                background = Themes.solid((acc and 0x00FFFFFF) or 0x24000000, dp(14).toFloat())
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(8), 0)
+                addView(TextView(context).apply { text = tv.model ?: "TV Samsung"; textSize = 15f; typeface = bold; setTextColor(p.text) })
+                addView(note(tvSub))
+            }, LinearLayout.LayoutParams(0, wrap, 1f))
+            addView(TextView(context).apply {
+                text = "Trocar"; textSize = 13f; typeface = bold; setTextColor(acc); gravity = android.view.Gravity.CENTER
+                setPadding(dp(14), 0, dp(14), 0); minHeight = dp(38)
+                background = Themes.solid((acc and 0x00FFFFFF) or 0x24000000, dp(19).toFloat())
+                setOnClickListener { buzz(); askIp() }
+            })
+        }, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(16) })
+
+        // Aparência: os 4 temas lado a lado + destaque + seguir o celular
+        box.addView(label("APARÊNCIA"))
+        val auto = prefs.getBoolean("themeAuto", false)
+        box.addView(LinearLayout(this).apply {
+            Themes.all.forEachIndexed { i, t ->
+                val on = !auto && t.name == p.name
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL
+                    setPadding(dp(6), dp(6), dp(6), dp(8))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(16).toFloat(); setColor((p.panel[0]))
+                        setStroke(if (on) dp(2) else d1, if (on) acc else p.edge)
+                    }
+                    contentDescription = "Tema ${t.name}"
+                    addView(android.widget.FrameLayout(context).apply {
+                        background = CrystalBackground(t); clipToOutline = true
+                        outlineProvider = object : android.view.ViewOutlineProvider() {
+                            override fun getOutline(v: View, o: android.graphics.Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(11).toFloat()) }
+                        }
+                        addView(View(context).apply { background = Themes.glass(t.btn, t.edge, -1f, d1) },
+                            android.widget.FrameLayout.LayoutParams(dp(28), dp(28), android.view.Gravity.CENTER))
+                    }, LinearLayout.LayoutParams(match, dp(62)))
+                    addView(TextView(context).apply {
+                        text = t.name; textSize = 11f; typeface = bold; setTextColor(p.text); gravity = android.view.Gravity.CENTER; setPadding(0, dp(6), 0, 0)
+                    })
+                    setOnClickListener {
+                        buzz(); prefs.edit().putString("theme", t.name).putBoolean("themeAuto", false).apply(); applyTheme(); reopen()
+                    }
+                }, LinearLayout.LayoutParams(0, wrap, 1f).apply { if (i > 0) marginStart = dp(8) })
             }
-            .setNeutralButton("Procurar TV") { _, _ -> scan() }
-            .setNegativeButton("Cancelar", null)
-            .show()
-        update.setOnClickListener { dialog.dismiss(); checkUpdate() }
-        look.setOnClickListener { dialog.dismiss(); showAppearance() }
-        tvApps.setOnClickListener { dialog.dismiss(); showTvApps() }
+        })
+        val appearance = card()
+        appearance.addView(line("Destaque", LinearLayout(this).apply {
+            val idx = prefs.getInt("accent", 0).coerceIn(0, 3)
+            p.accents.forEachIndexed { i, c ->
+                addView(View(context).apply {
+                    contentDescription = "Destaque ${Themes.accentNames[i]}"
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(c)
+                        setStroke(if (i == idx) dp(3) else d1, if (i == idx) p.text else p.edge)
+                    }
+                    setOnClickListener { buzz(); prefs.edit().putInt("accent", i).apply(); applyTheme(); reopen() }
+                }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(10) })
+            }
+        }))
+        divider(appearance)
+        appearance.addView(line("Seguir o tema do celular", toggle("themeAuto", false) { applyTheme(); reopen() }))
+        box.addView(appearance, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
+
+        // Controle: vibração, volume do celular e notificação
+        box.addView(label("CONTROLE"))
+        val control = card()
+        val levels = listOf("Off", "Fraca", "Média", "Forte")
+        val seg = LinearLayout(this).apply { setPadding(dp(3), dp(3), dp(3), dp(3)); background = Themes.solid((p.muted and 0x00FFFFFF) or 0x1F000000, dp(14).toFloat()) }
+        fun paintSeg() = levels.indices.forEach { i ->
+            (seg.getChildAt(i) as TextView).apply {
+                val on = i == hapticLevel
+                setTextColor(if (on) acc else p.muted)
+                background = if (on) Themes.solid(if (p.dark) 0x33FFFFFF else Color.WHITE, dp(11).toFloat()) else null
+            }
+        }
+        levels.forEachIndexed { i, t ->
+            seg.addView(TextView(this).apply {
+                text = t; textSize = 12f; typeface = bold; setPadding(dp(9), dp(6), dp(9), dp(6))
+                setOnClickListener { hapticLevel = i; buzz(level = i); paintSeg() }
+            })
+        }
+        paintSeg()
+        control.addView(line("Vibração", seg)); divider(control)
+        control.addView(line("Volume do celular controla a TV", toggle("volKeys"))); divider(control)
+        control.addView(line("Controle na notificação", toggle("notif") { on ->
+            if (on && Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9)
+        }))
+        box.addView(control)
+
+        // Apps da TV e versão
+        val about = card()
+        val n = tv.installed.size
+        about.addView(line("Apps da TV", note(if (n > 0) "$n · via ${tv.appsSource}  ›" else "procurar  ›")) { dlg.dismiss(); showTvApps() })
+        divider(about)
+        about.addView(line("Versão $myVersion", note("Verificar atualização", acc).apply { typeface = bold }) { dlg.dismiss(); checkUpdate() })
+        tv.lastError?.let { divider(about); about.addView(line("Último erro da TV", note(it.take(40)))) }
+        box.addView(about, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(14) })
+
+        dlg.setContentView(android.widget.ScrollView(this).apply { addView(box) })
+        dlg.window?.apply {
+            setBackgroundDrawable(CrystalBackground(p))
+            statusBarColor = p.base; navigationBarColor = p.base
+            @Suppress("DEPRECATION")
+            decorView.systemUiVisibility = if (p.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+        dlg.show()
+    }
+
+    /** IP da TV digitado à mão, ou procurar no Wi-Fi. */
+    private fun askIp() {
+        val input = EditText(this).apply { hint = "Ex.: 192.168.0.15"; inputType = InputType.TYPE_CLASS_PHONE; setText(tv.ip ?: "") }
+        AlertDialog.Builder(this).setTitle("Trocar de TV")
+            .setMessage("IP da TV — na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
+            .setView(LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(input, LinearLayout.LayoutParams(-1, -2)) })
+            .setPositiveButton("Conectar") { _, _ -> input.text.toString().trim().takeIf { it.isNotEmpty() }?.let { tv.setIp(it); tv.connect() } }
+            .setNeutralButton("Procurar no Wi‑Fi") { _, _ -> scan() }
+            .setNegativeButton("Cancelar", null).show()
     }
 
     /** Conexão: escolher IR ou Wi-Fi, reconectar ou procurar a TV. */
