@@ -53,10 +53,7 @@ class MainActivity : Activity() {
     private lateinit var tv: SamsungTv
     private lateinit var status: Banner
     private lateinit var ir: IrRemote
-    private lateinit var segIr: View
-    private lateinit var segWifi: View
-    private lateinit var apps1: LinearLayout
-    private lateinit var apps2: LinearLayout
+    private lateinit var appsRow: LinearLayout
     private val prefs by lazy { getSharedPreferences("tv", MODE_PRIVATE) }
     private var irMode: Boolean
         get() = ir.available && prefs.getBoolean("ir", true)
@@ -75,14 +72,11 @@ class MainActivity : Activity() {
         tv.onState = { st -> runOnUiThread { refreshPill(st) } }
         tv.onIcon = { runOnUiThread { scheduleRenderApps() } }
         ir = IrRemote(this)
-        segIr = findViewById(R.id.segIr)
-        segWifi = findViewById(R.id.segWifi)
-        apps1 = findViewById(R.id.apps1)
-        apps2 = findViewById(R.id.apps2)
+        appsRow = findViewById(R.id.apps)
         wire(findViewById(R.id.root))
         findViewById<View>(R.id.settings).setOnClickListener { showSettings() }
         findViewById<View>(R.id.power).setOnClickListener { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
-        findViewById<View>(R.id.dialpad).setOnClickListener { buzz(); showNumpad() }
+        findViewById<View>(R.id.more).setOnClickListener { buzz(); showMore() }
         fitDpad()
         findViewById<View>(R.id.playPause).setOnClickListener {
             buzz()
@@ -96,23 +90,7 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("askedNotif", true).apply()
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9)
         }
-        segIr.setOnClickListener {
-            buzz()
-            if (!ir.available) { status.text = "Este celular não tem infravermelho"; return@setOnClickListener }
-            if (!irMode) { irMode = true; applyMode() }
-        }
-        segWifi.setOnClickListener { buzz(); if (irMode) { irMode = false; applyMode() } }
-        findViewById<View>(R.id.statusPill).setOnClickListener {
-            buzz()
-            when {
-                irMode -> status.text = "Modo IR: aponte o topo do celular para a TV"
-                tv.ip == null -> scan()
-                else -> { autoScanned = false; tv.connect() }
-            }
-        }
-        findViewById<View>(R.id.keyboard).setOnClickListener {
-            buzz(); if (irMode) status.text = "O teclado só funciona no Wi-Fi: toque em Wi-Fi no topo" else showKeyboard()
-        }
+        findViewById<View>(R.id.statusPill).setOnClickListener { buzz(); showConnection() }
         voiceButton(findViewById(R.id.voice))
         tv.onIme = { open -> runOnUiThread { tvKeyboardOpen = open; if (open && resumed) showKeyboard() else if (!open) keyboardDialog?.dismiss() } }
         renderApps()
@@ -123,11 +101,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyMode() {
-        segIr.isSelected = irMode
-        segWifi.isSelected = !irMode
-        // No IR, o que depende do Wi-Fi fica esmaecido (os atalhos ainda tentam pela rede)
-        val a = if (irMode) 0.45f else 1f
-        apps1.alpha = a; apps2.alpha = a; findViewById<View>(R.id.keyboard).alpha = a
+        findViewById<android.widget.ImageView>(R.id.statusMode).setImageResource(if (irMode) R.drawable.ic_ir else R.drawable.ic_wifi)
         if (irMode) tv.disconnect() else tv.connect()
         refreshPill(null)
     }
@@ -220,7 +194,6 @@ class MainActivity : Activity() {
     private fun setupTouchPad() {
         val touch = findViewById<TouchPad>(R.id.touchpad)
         showTouchPad(prefs.getBoolean("touchpad", false))
-        findViewById<View>(R.id.padToggle).setOnClickListener { buzz(); showTouchPad(touch.visibility != View.VISIBLE) }
         touch.onArrow = { k -> buzz(Buzz.TICK); press(k) }
         touch.onTap = {
             buzz()
@@ -241,10 +214,6 @@ class MainActivity : Activity() {
     private fun showTouchPad(on: Boolean) {
         findViewById<View>(R.id.touchpad).visibility = if (on) View.VISIBLE else View.GONE
         findViewById<View>(R.id.dpad).visibility = if (on) View.GONE else View.VISIBLE
-        findViewById<ImageButton>(R.id.padToggle).apply {
-            setImageResource(if (on) R.drawable.ic_dpad else R.drawable.ic_touch)
-            contentDescription = if (on) "Voltar ao direcional" else "Trocar para touchpad"
-        }
         prefs.edit().putBoolean("touchpad", on).apply()
     }
 
@@ -339,13 +308,47 @@ class MainActivity : Activity() {
         update.setOnClickListener { dialog.dismiss(); checkUpdate() }
     }
 
-    /** Painel de números por cima do controle (não estica a tela). */
-    private fun showNumpad() {
-        val pad = layoutInflater.inflate(R.layout.numpad, null)
-        wire(pad)
-        val dialog = AlertDialog.Builder(this).setView(pad).create()
-        pad.findViewById<View>(R.id.numClose).setOnClickListener { buzz(); dialog.dismiss() }
+    /** Conexão: escolher IR ou Wi-Fi, reconectar ou procurar a TV. */
+    private fun showConnection() {
+        val modes = if (ir.available) arrayOf("Wi-Fi (rede)", "Infravermelho (IR)") else arrayOf("Wi-Fi (rede)")
+        val info = tv.model?.let { "TV: $it" } ?: tv.ip?.let { "TV em $it" } ?: "TV ainda não encontrada"
+        AlertDialog.Builder(this).setTitle("Conexão · $info")
+            .setSingleChoiceItems(modes, if (irMode) 1 else 0) { d, w ->
+                buzz(); val ir = w == 1
+                if (ir != irMode) { irMode = ir; applyMode() }
+                d.dismiss()
+            }
+            .setPositiveButton("Reconectar") { _, _ ->
+                if (irMode) status.text = "Modo IR: aponte o topo do celular para a TV"
+                else if (tv.ip == null) scan() else { autoScanned = false; tv.connect() }
+            }
+            .setNeutralButton("Procurar TV") { _, _ -> scan() }
+            .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    /** Painel "Mais" vindo de baixo: Fonte, Menu, Enter, teclado, touchpad, apps e números. */
+    private fun showMore() {
+        val sheet = layoutInflater.inflate(R.layout.more, null)
+        wire(sheet)
+        val dialog = AlertDialog.Builder(this).setView(sheet).create()
+        val onPad = findViewById<View>(R.id.touchpad).visibility == View.VISIBLE
+        sheet.findViewById<Button>(R.id.mPad).apply {
+            text = if (onPad) "Direcional" else "Touchpad"
+            setCompoundDrawablesRelativeWithIntrinsicBounds(0, if (onPad) R.drawable.ic_dpad else R.drawable.ic_touch, 0, 0)
+            setOnClickListener { buzz(); showTouchPad(!onPad); dialog.dismiss() }
+        }
+        sheet.findViewById<View>(R.id.mKeyboard).setOnClickListener {
+            buzz(); dialog.dismiss()
+            if (irMode) status.text = "O teclado só funciona no Wi-Fi: toque no status do topo" else showKeyboard()
+        }
+        sheet.findViewById<View>(R.id.mApps).setOnClickListener { buzz(); dialog.dismiss(); showAllApps() }
+        dialog.window?.apply {
+            setGravity(android.view.Gravity.BOTTOM)
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
         dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     /** O direcional diminui se a tela for baixa, para tudo caber sem rolar. */
@@ -553,23 +556,6 @@ class MainActivity : Activity() {
 
     private fun rounded(color: Int) = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(9).toFloat(); setColor(color) }
 
-    private fun tile(label: CharSequence, logo: View, click: () -> Unit, long: (() -> Unit)? = null) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = android.view.Gravity.CENTER
-        background = getDrawable(R.drawable.btn)
-        stateListAnimator = AnimatorInflater.loadStateListAnimator(context, R.animator.press)
-        contentDescription = label
-        addView(logo, LinearLayout.LayoutParams(dp(32), dp(32)))
-        addView(TextView(context).apply {
-            text = label; textSize = 10.5f; setTextColor(0xFFB0BEC5.toInt()); isSingleLine = true
-            ellipsize = android.text.TextUtils.TruncateAt.END; gravity = android.view.Gravity.CENTER
-            setPadding(dp(3), dp(3), dp(3), 0)
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        layoutParams = LinearLayout.LayoutParams(0, dp(64), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) }
-        setOnClickListener { buzz(); click() }
-        long?.let { l -> setOnLongClickListener { l(); true } }
-    }
-
     private fun logoView(name: String, id: String): View {
         iconFor(name, id)?.let { bmp ->
             return android.widget.ImageView(this).apply {
@@ -594,23 +580,30 @@ class MainActivity : Activity() {
     /** Junta vários ícones que chegam juntos numa só atualização da tela. */
     private fun scheduleRenderApps() { handler.removeCallbacks(renderAppsRunnable); handler.postDelayed(renderAppsRunnable, 300) }
 
-    /** Grade fixa de 8 lugares (4 + 4). Com mais de 7 apps, o último vira "Mais". */
+    /** Uma linha de logos: até 6 apps + "Adicionar" (ou "Mais apps" se tiver mais de 6). */
     private fun renderApps() {
-        apps1.removeAllViews(); apps2.removeAllViews()
+        appsRow.removeAllViews()
         val apps = loadApps()
-        val shown = if (apps.size <= 7) apps.size else 7
-        val cells = mutableListOf<View>()
+        val slots = 7
+        val shown = if (apps.size < slots) apps.size else slots - 1
         apps.take(shown).forEachIndexed { i, sc ->
-            // Cena: bolinha vermelha antes do nome
-            val label = if (!sc.power) sc.name else android.text.SpannableString("● " + sc.name).apply {
-                setSpan(android.text.style.ForegroundColorSpan(0xFFE53935.toInt()), 0, 1, 0)
-            }
-            cells += tile(label, logoView(sc.name, sc.id), { openShortcut(sc) }).also { enableDrag(it, i) }
+            appsRow.addView(appTile(sc.name, logoView(sc.name, sc.id), sc.power) { openShortcut(sc) }.also { enableDrag(it, i) })
         }
-        cells += if (apps.size > 7) tile("Mais", monogram("⋯", 0xFF3A4150.toInt()), { showAllApps() })
-            else tile("Adicionar", monogram("+", 0xFF3A4150.toInt()), { addApp() })
-        while (cells.size < 8) cells += View(this).apply { layoutParams = LinearLayout.LayoutParams(0, dp(64), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) } }
-        cells.forEachIndexed { i, v -> (if (i < 4) apps1 else apps2).addView(v) }
+        appsRow.addView(if (apps.size >= slots) appTile("Todos os apps", monogram("⋯", 0xFF3A4150.toInt()), false) { showAllApps() }
+            else appTile("Adicionar app", monogram("+", 0xFF3A4150.toInt()), false) { addApp() })
+        repeat(slots - appsRow.childCount) { appsRow.addView(View(this), LinearLayout.LayoutParams(0, dp(52), 1f)) }
+    }
+
+    /** Logo do app (sem texto); cena = bolinha vermelha no canto. */
+    private fun appTile(name: String, logo: View, scene: Boolean, click: () -> Unit) = android.widget.FrameLayout(this).apply {
+        contentDescription = if (scene) "$name (liga a TV e abre)" else name
+        background = getDrawable(R.drawable.touch_round)
+        stateListAnimator = AnimatorInflater.loadStateListAnimator(context, R.animator.press)
+        addView(logo, android.widget.FrameLayout.LayoutParams(dp(42), dp(42), android.view.Gravity.CENTER))
+        if (scene) addView(View(context).apply { background = getDrawable(R.drawable.dot); background.setTint(0xFFE53935.toInt()) },
+            android.widget.FrameLayout.LayoutParams(dp(10), dp(10), android.view.Gravity.TOP or android.view.Gravity.END).apply { setMargins(0, dp(2), dp(4), 0) })
+        layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)
+        setOnClickListener { buzz(); click() }
     }
 
     private fun showAllApps() {

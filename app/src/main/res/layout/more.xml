@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel "Mais": controles usados de vez em quando -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent"
+    android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp" android:background="@drawable/sheet_bg">
+    <View android:layout_width="40dp" android:layout_height="4dp" android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="10dp" android:background="@drawable/grabber" />
+    <LinearLayout style="@style/Row">
+        <Button style="@style/SheetKey" android:tag="KEY_SOURCE" android:drawableTop="@drawable/ic_input" android:text="Fonte" />
+        <Button style="@style/SheetKey" android:tag="KEY_MENU" android:drawableTop="@drawable/ic_menu" android:text="Menu" />
+        <Button style="@style/SheetKey" android:tag="KEY_ENTER" android:drawableTop="@drawable/ic_enter" android:text="Enter" />
+    </LinearLayout>
+    <LinearLayout style="@style/Row">
+        <Button style="@style/SheetKey" android:id="@+id/mKeyboard" android:drawableTop="@drawable/ic_keyboard" android:text="Teclado" />
+        <Button style="@style/SheetKey" android:id="@+id/mPad" android:drawableTop="@drawable/ic_touch" android:text="Touchpad" />
+        <Button style="@style/SheetKey" android:id="@+id/mApps" android:drawableTop="@drawable/ic_dialpad" android:text="Todos os apps" />
+    </LinearLayout>
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp"
+        android:layout_marginTop="10dp" android:layout_marginBottom="2dp" android:text="Números" android:textColor="#AEB8C2" android:textSize="13sp" />
+    <LinearLayout style="@style/Row">
+        <Button style="@style/NumKey" android:tag="KEY_1" android:text="1" />
+        <Button style="@style/NumKey" android:tag="KEY_2" android:text="2" />
+        <Button style="@style/NumKey" android:tag="KEY_3" android:text="3" />
+        <Button style="@style/NumKey" android:tag="KEY_4" android:text="4" />
+        <Button style="@style/NumKey" android:tag="KEY_5" android:text="5" />
+    </LinearLayout>
+    <LinearLayout style="@style/Row">
+        <Button style="@style/NumKey" android:tag="KEY_6" android:text="6" />
+        <Button style="@style/NumKey" android:tag="KEY_7" android:text="7" />
+        <Button style="@style/NumKey" android:tag="KEY_8" android:text="8" />
+        <Button style="@style/NumKey" android:tag="KEY_9" android:text="9" />
+        <Button style="@style/NumKey" android:tag="KEY_0" android:text="0" />
+    </LinearLayout>
+</LinearLayout>

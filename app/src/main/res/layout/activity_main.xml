@@ -1,51 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Layout por zonas, numa grade de 3 colunas (esquerda | centro 72dp | direita):
+  1. Conexão  2. Apps  3. Navegação  4. Voltar/Voz/Home  5. Mídia  6. Volume/Canal
+  Formas: círculo para ícone único no centro; cantos de 18dp para o resto. Espaço entre botões: 8dp.
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent">
-<LinearLayout android:id="@+id/root"
-        android:layout_width="match_parent" android:layout_height="match_parent"
-        android:orientation="vertical" android:padding="10dp">
-        <!-- Cabeçalho: status em pílula, seletor IR | Wi-Fi e configurações -->
-        <LinearLayout style="@style/Row" android:gravity="center_vertical">
-            <LinearLayout android:id="@+id/statusPill" android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="52dp" android:layout_marginEnd="8dp" android:orientation="horizontal"
-                android:gravity="center_vertical" android:paddingStart="14dp" android:paddingEnd="12dp"
-                android:background="@drawable/btn" android:stateListAnimator="@animator/press"
-                android:contentDescription="Estado da conexão. Toque para reconectar">
-                <View android:id="@+id/statusDot" android:layout_width="10dp" android:layout_height="10dp"
-                    android:background="@drawable/dot" />
-                <TextView android:id="@+id/statusLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp" android:textColor="#E8ECF2" android:textSize="14sp"
-                    android:singleLine="true" android:ellipsize="end" android:text="Iniciando…" />
-            </LinearLayout>
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="52dp" android:layout_marginEnd="8dp"
-                android:orientation="horizontal" android:padding="4dp" android:background="@drawable/seg_bg">
-                <TextView android:id="@+id/segIr" android:layout_width="wrap_content" android:layout_height="match_parent"
-                    android:gravity="center" android:paddingStart="12dp" android:paddingEnd="12dp" android:drawablePadding="4dp"
-                    android:drawableStart="@drawable/ic_ir" android:background="@drawable/seg_on"
-                    android:textColor="#E8ECF2" android:textSize="14sp" android:text="IR" />
-                <TextView android:id="@+id/segWifi" android:layout_width="wrap_content" android:layout_height="match_parent"
-                    android:gravity="center" android:paddingStart="12dp" android:paddingEnd="12dp" android:drawablePadding="4dp"
-                    android:drawableStart="@drawable/ic_wifi" android:background="@drawable/seg_on"
-                    android:textColor="#E8ECF2" android:textSize="14sp" android:text="Wi-Fi" />
-            </LinearLayout>
-            <ImageButton android:id="@+id/settings" style="@style/RoundBtn" android:layout_width="52dp"
-                android:layout_height="52dp" android:layout_margin="0dp" android:src="@drawable/ic_settings"
-                android:contentDescription="Configurações" />
-        </LinearLayout>
-        <Space android:layout_width="1dp" android:layout_height="8dp" />
-        <LinearLayout style="@style/Row" android:gravity="center_vertical">
-            <ImageButton style="@style/RoundBtn" android:id="@+id/power" android:background="@drawable/btn_power"
-                android:src="@drawable/ic_power" android:contentDescription="Ligar ou desligar" />
-            <Button style="@style/LabelBtn" android:tag="KEY_SOURCE" android:drawableTop="@drawable/ic_input" android:text="Fonte" />
-            <Button style="@style/LabelBtn" android:tag="KEY_MENU" android:drawableTop="@drawable/ic_menu" android:text="Menu" />
-        </LinearLayout>
-        <!-- Atalhos de apps: grade fixa 4 + 4 -->
-        <LinearLayout android:id="@+id/apps1" style="@style/Row" android:layout_marginTop="4dp" />
-        <LinearLayout android:id="@+id/apps2" style="@style/Row" />
+<LinearLayout android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:paddingStart="12dp" android:paddingEnd="12dp"
+    android:paddingTop="10dp" android:paddingBottom="12dp">
 
-        <!-- Direcional circular: anel com as setas e OK no centro -->
-        <FrameLayout android:id="@+id/dpadBox" android:layout_width="match_parent" android:layout_height="0dp"
-            android:layout_weight="1" android:clipChildren="false">
+    <!-- 1. Conexão: status (tocar = IR/Wi-Fi), configurações e liga/desliga -->
+    <LinearLayout style="@style/Row" android:gravity="center_vertical">
+        <LinearLayout android:id="@+id/statusPill" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="52dp" android:layout_margin="4dp" android:orientation="horizontal"
+            android:gravity="center_vertical" android:paddingStart="16dp" android:paddingEnd="12dp"
+            android:background="@drawable/btn" android:stateListAnimator="@animator/press"
+            android:contentDescription="Conexão. Toque para escolher IR ou Wi-Fi">
+            <View android:id="@+id/statusDot" android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/dot" />
+            <TextView android:id="@+id/statusLabel" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_marginStart="10dp" android:textColor="#E8ECF2"
+                android:textSize="15sp" android:singleLine="true" android:ellipsize="end" android:text="Iniciando…" />
+            <ImageView android:id="@+id/statusMode" android:layout_width="20dp" android:layout_height="20dp"
+                android:src="@drawable/ic_wifi" android:alpha="0.7" android:importantForAccessibility="no" />
+        </LinearLayout>
+        <ImageButton android:id="@+id/settings" style="@style/RoundKey" android:layout_width="52dp" android:layout_height="52dp"
+            android:src="@drawable/ic_settings" android:contentDescription="Configurações" />
+        <ImageButton android:id="@+id/power" style="@style/RoundKey" android:layout_width="52dp" android:layout_height="52dp"
+            android:background="@drawable/btn_power" android:src="@drawable/ic_power" android:contentDescription="Ligar ou desligar" />
+    </LinearLayout>
+
+    <!-- 2. Apps: só a logo, numa linha -->
+    <LinearLayout android:id="@+id/apps" style="@style/Row" android:layout_marginTop="6dp" />
+
+    <!-- 3. Navegação: direcional ou touchpad (ocupa o espaço que sobrar) -->
+    <FrameLayout android:id="@+id/dpadBox" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:clipChildren="false">
         <FrameLayout android:id="@+id/dpad" android:layout_width="264dp" android:layout_height="264dp" android:layout_gravity="center"
             android:padding="4dp" android:background="@drawable/dpad_ring" android:elevation="6dp">
             <ImageButton style="@style/DpadBtn" android:layout_gravity="top|center_horizontal" android:tag="KEY_UP"
@@ -61,50 +51,48 @@
                 android:textStyle="bold" android:background="@drawable/btn_ok" android:elevation="4dp"
                 android:stateListAnimator="@animator/press" />
         </FrameLayout>
-        <!-- Touchpad (aparece no lugar do direcional) -->
         <com.rafajames.controletv.TouchPad android:id="@+id/touchpad" android:layout_width="264dp" android:layout_height="264dp"
             android:layout_gravity="center" android:visibility="gone" android:contentDescription="Touchpad" />
-        <!-- Cantos: mídia e troca direcional/touchpad -->
-        <ImageButton android:id="@+id/playPause" style="@style/CornerBtn" android:layout_gravity="top|start"
-            android:src="@drawable/ic_playpause" android:contentDescription="Pausar ou continuar" />
-        <ImageButton android:id="@+id/padToggle" style="@style/CornerBtn" android:layout_gravity="top|end"
-            android:src="@drawable/ic_touch" android:contentDescription="Trocar para touchpad" />
-        <ImageButton style="@style/CornerBtn" android:layout_gravity="bottom|start" android:tag="KEY_REWIND"
-            android:src="@drawable/ic_rewind" android:contentDescription="Voltar (retroceder)" />
-        <ImageButton style="@style/CornerBtn" android:layout_gravity="bottom|end" android:tag="KEY_FF"
-            android:src="@drawable/ic_forward" android:contentDescription="Avançar" />
-        </FrameLayout>
+    </FrameLayout>
 
-        <LinearLayout style="@style/Row">
-            <Button style="@style/SmallBtn" android:tag="KEY_RETURN" android:drawableTop="@drawable/ic_back" android:text="Voltar" />
-            <Button style="@style/SmallBtn" android:tag="KEY_HOME" android:drawableTop="@drawable/ic_home" android:text="Home" />
-            <Button style="@style/SmallBtn" android:id="@+id/keyboard" android:drawableTop="@drawable/ic_keyboard" android:text="Teclado" />
-            <Button style="@style/SmallBtn" android:id="@+id/voice" android:drawableTop="@drawable/ic_mic" android:text="Voz" />
-            <Button style="@style/SmallBtn" android:tag="KEY_ENTER" android:drawableTop="@drawable/ic_enter" android:text="Enter" />
+    <!-- 4. Voltar | Voz | Home -->
+    <LinearLayout style="@style/Row" android:gravity="center_vertical">
+        <Button style="@style/Key" android:tag="KEY_RETURN" android:drawableStart="@drawable/ic_back" android:text="Voltar" />
+        <ImageButton style="@style/RoundKey" android:id="@+id/voice" android:src="@drawable/ic_mic"
+            android:contentDescription="Voz. Segure para o assistente da TV" />
+        <Button style="@style/Key" android:tag="KEY_HOME" android:drawableStart="@drawable/ic_home" android:text="Home" />
+    </LinearLayout>
+
+    <!-- 5. Mídia: retroceder | play/pausa | avançar -->
+    <LinearLayout style="@style/Row" android:gravity="center_vertical">
+        <ImageButton style="@style/IconKey" android:tag="KEY_REWIND" android:src="@drawable/ic_rewind" android:contentDescription="Retroceder" />
+        <ImageButton style="@style/RoundKey" android:id="@+id/playPause" android:src="@drawable/ic_playpause" android:contentDescription="Pausar ou continuar" />
+        <ImageButton style="@style/IconKey" android:tag="KEY_FF" android:src="@drawable/ic_forward" android:contentDescription="Avançar" />
+    </LinearLayout>
+
+    <!-- 6. Volume | mudo + Mais | Canal -->
+    <LinearLayout style="@style/Row" android:gravity="center_vertical">
+        <LinearLayout style="@style/Pill">
+            <ImageButton style="@style/PillBtn" android:tag="KEY_VOLUP" android:src="@drawable/ic_add" android:contentDescription="Aumentar volume" />
+            <TextView style="@style/PillLabel" android:text="VOL" />
+            <ImageButton style="@style/PillBtn" android:tag="KEY_VOLDOWN" android:src="@drawable/ic_remove" android:contentDescription="Diminuir volume" />
         </LinearLayout>
-
-        <!-- Volume e canal em pílulas, como num controle físico -->
-        <LinearLayout style="@style/Row" android:gravity="center_vertical">
-            <LinearLayout style="@style/Pill">
-                <ImageButton style="@style/PillBtn" android:tag="KEY_VOLUP" android:src="@drawable/ic_add" android:contentDescription="Aumentar volume" />
-                <TextView style="@style/PillLabel" android:text="VOL" />
-                <ImageButton style="@style/PillBtn" android:tag="KEY_VOLDOWN" android:src="@drawable/ic_remove" android:contentDescription="Diminuir volume" />
-            </LinearLayout>
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical">
-                <ImageButton style="@style/RoundBtn" android:tag="KEY_MUTE" android:src="@drawable/ic_mute" android:contentDescription="Mudo" />
-                <ImageButton style="@style/RoundBtn" android:id="@+id/dialpad" android:src="@drawable/ic_dialpad" android:contentDescription="Teclado numérico" />
-            </LinearLayout>
-            <LinearLayout style="@style/Pill">
-                <ImageButton style="@style/PillBtn" android:tag="KEY_CHUP" android:src="@drawable/ic_ch_up" android:contentDescription="Próximo canal" />
-                <TextView style="@style/PillLabel" android:text="CH" />
-                <ImageButton style="@style/PillBtn" android:tag="KEY_CHDOWN" android:src="@drawable/ic_ch_down" android:contentDescription="Canal anterior" />
-            </LinearLayout>
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical">
+            <ImageButton style="@style/RoundKey" android:tag="KEY_MUTE" android:src="@drawable/ic_mute" android:contentDescription="Mudo" />
+            <Button style="@style/RoundKeyText" android:id="@+id/more" android:text="Mais" android:textSize="13sp" android:paddingTop="0dp" android:gravity="center"
+                android:contentDescription="Mais controles: Fonte, Menu, Enter, teclado, números e touchpad" />
         </LinearLayout>
-
+        <LinearLayout style="@style/Pill">
+            <ImageButton style="@style/PillBtn" android:tag="KEY_CHUP" android:src="@drawable/ic_ch_up" android:contentDescription="Próximo canal" />
+            <TextView style="@style/PillLabel" android:text="CH" />
+            <ImageButton style="@style/PillBtn" android:tag="KEY_CHDOWN" android:src="@drawable/ic_ch_down" android:contentDescription="Canal anterior" />
+        </LinearLayout>
+    </LinearLayout>
 </LinearLayout>
+
     <!-- Aviso que aparece por alguns segundos e some -->
     <TextView android:id="@+id/banner" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_gravity="top" android:layout_marginTop="70dp" android:layout_marginStart="14dp"
-        android:layout_marginEnd="14dp" android:padding="14dp" android:background="@drawable/banner"
+        android:layout_gravity="top" android:layout_marginTop="70dp" android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp" android:padding="14dp" android:background="@drawable/banner"
         android:elevation="12dp" android:textColor="#E8ECF2" android:textSize="14sp" android:visibility="gone" />
 </FrameLayout>
