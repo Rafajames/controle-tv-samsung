@@ -51,6 +51,12 @@
             <Button style="@style/LabelBtn" android:tag="KEY_RETURN" android:drawableTop="@drawable/ic_back" android:text="Voltar" />
             <Button style="@style/LabelBtn" android:tag="KEY_HOME" android:drawableTop="@drawable/ic_home" android:text="Home" />
         </LinearLayout>
+        <!-- Teclado do celular, voz (segure para o assistente da TV) e Enter -->
+        <LinearLayout style="@style/Row">
+            <Button style="@style/LabelBtn" android:id="@+id/keyboard" android:drawableTop="@drawable/ic_keyboard" android:text="Teclado" />
+            <Button style="@style/LabelBtn" android:id="@+id/voice" android:drawableTop="@drawable/ic_mic" android:text="Voz" />
+            <Button style="@style/LabelBtn" android:tag="KEY_ENTER" android:drawableTop="@drawable/ic_enter" android:text="Enter" />
+        </LinearLayout>
         <Space android:layout_width="1dp" android:layout_height="8dp" />
 
         <!-- Volume e canal em pílulas, como num controle físico -->

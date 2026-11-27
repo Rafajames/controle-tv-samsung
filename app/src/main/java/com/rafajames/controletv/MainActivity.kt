@@ -12,6 +12,12 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.widget.CheckBox
+import android.content.ActivityNotFoundException
+import android.speech.RecognizerIntent
+import android.view.KeyEvent
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import java.text.Normalizer
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -30,6 +36,8 @@ import org.json.JSONObject
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
+
+    private companion object { const val SPEECH_COMMAND = 1; const val SPEECH_TEXT = 2 }
 
     private lateinit var tv: SamsungTv
     private lateinit var status: TextView
@@ -72,6 +80,9 @@ class MainActivity : Activity() {
             text = "Verificar atualização (versão $myVersion)"
             setOnClickListener { checkUpdate() }
         }
+        findViewById<View>(R.id.keyboard).setOnClickListener { buzz(); showKeyboard() }
+        voiceButton(findViewById(R.id.voice))
+        tv.onIme = { open -> runOnUiThread { tvKeyboardOpen = open; if (open && resumed) showKeyboard() else if (!open) keyboardDialog?.dismiss() } }
         renderApps()
         applyMode()
         if (!irMode && tv.ip == null) scan()
@@ -86,6 +97,9 @@ class MainActivity : Activity() {
 
     private fun press(key: String) = if (irMode) ir.send(key) else tv.key(key)
 
+    private var resumed = false
+    override fun onResume() { super.onResume(); resumed = true }
+    override fun onPause() { super.onPause(); resumed = false }
     override fun onStart() { super.onStart(); if (!irMode) tv.connect() }
     override fun onStop() { super.onStop(); tv.disconnect() }
 
@@ -150,7 +164,8 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Configurações")
-            .setMessage("IP da TV — na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
+            .setMessage((tv.model?.let { "TV: $it · voz: " + when (tv.voiceSupport) { true -> "sim"; false -> "não"; null -> "?" } + "\n\n" } ?: "") +
+                "IP da TV — na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
             .setView(box)
             .setPositiveButton("Salvar") { _, _ ->
                 hapticOn = vibrate.isChecked
@@ -171,6 +186,138 @@ class MainActivity : Activity() {
                 else status.text = "Nenhuma TV encontrada. Ligue a TV, confira o Wi-Fi e toque em ⚙"
             }
         }
+    }
+
+    // ---------- Teclado e voz ----------
+
+    private var tvKeyboardOpen = false
+    private var keyboardDialog: AlertDialog? = null
+
+    /** Só o Wi-Fi manda texto; pelo infravermelho não existe esse comando. */
+    private fun canType(): Boolean {
+        if (irMode) { status.text = "Para escrever, troque para Wi-Fi (botão IR no topo)"; return false }
+        if (tv.ip == null) { status.text = "Toque em ⚙ para achar a TV no Wi-Fi primeiro"; return false }
+        return true
+    }
+
+    private fun sendText(t: String) {
+        if (t.isBlank() || !canType()) return
+        tv.text(t); tv.textEnd()
+        status.text = if (tvKeyboardOpen) "Enviado: $t" else "Enviado: $t (se nada aparecer, selecione o campo de texto na TV)"
+    }
+
+    /** Caixa de texto com o teclado do celular (Gboard tem o microfone para ditar). */
+    private fun showKeyboard() {
+        if (keyboardDialog?.isShowing == true || !canType()) return
+        val input = EditText(this).apply {
+            hint = "Digite ou toque no microfone do teclado"
+            isSingleLine = true
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+        }
+        val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(input,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)) }
+        val dialog = AlertDialog.Builder(this).setTitle("Escrever na TV").setView(box)
+            .setPositiveButton("Enviar") { _, _ -> sendText(input.text.toString()) }
+            .setNeutralButton("Ditar") { _, _ -> listen(SPEECH_TEXT) }
+            .setNegativeButton("Fechar", null)
+            .create()
+        input.setOnEditorActionListener { _, action, e ->
+            if (action == EditorInfo.IME_ACTION_SEARCH || e?.keyCode == KeyEvent.KEYCODE_ENTER) {
+                buzz(); sendText(input.text.toString()); dialog.dismiss(); true
+            } else false
+        }
+        dialog.setOnDismissListener { keyboardDialog = null }
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        keyboardDialog = dialog
+        dialog.show()
+        input.requestFocus()
+    }
+
+    /** Toque: comando de voz do app. Segurar: tecla de voz da TV (experimental, só se a TV tiver microfone). */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun voiceButton(v: View) {
+        var holding = false
+        val startHold = Runnable {
+            if (irMode || tv.ip == null) return@Runnable
+            holding = true; buzz(Buzz.HEAVY)
+            tv.key("KEY_BT_VOICE", "Press")
+            status.text = if (tv.voiceSupport == false) "Sua TV diz que não tem voz. Tentando mesmo assim… fale perto da TV"
+                else "Assistente da TV: fale agora e solte o botão"
+        }
+        v.setOnTouchListener { view, e ->
+            when (e.action) {
+                MotionEvent.ACTION_DOWN -> { view.isPressed = true; holding = false; handler.postDelayed(startHold, 600) }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    view.isPressed = false; handler.removeCallbacks(startHold)
+                    if (holding) tv.key("KEY_BT_VOICE", "Release")
+                    else if (e.action == MotionEvent.ACTION_UP) { buzz(); listen(SPEECH_COMMAND) }
+                }
+            }
+            true
+        }
+    }
+
+    private fun listen(mode: Int) {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, if (mode == SPEECH_TEXT) "Fale o que escrever na TV"
+                else "Ex.: abrir Netflix, aumentar volume, canal 12, pesquisar…")
+        try { startActivityForResult(intent, mode) }
+        catch (_: ActivityNotFoundException) { status.text = "Este celular não tem reconhecimento de voz do Google" }
+    }
+
+    @Deprecated("API de Activity simples")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val said = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
+        if (resultCode != RESULT_OK) return
+        if (requestCode == SPEECH_TEXT) sendText(said) else command(said)
+    }
+
+    private fun plain(s: String) = Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").trim()
+
+    /** Aperta a tecla n vezes, com um intervalo curto entre elas. */
+    private fun pressTimes(key: String, n: Int) = repeat(n.coerceIn(1, 30)) { i -> handler.postDelayed({ press(key) }, i * 180L) }
+
+    /** "Alexa" do app: entende frases simples e aperta os botões. */
+    private fun command(said: String) {
+        val t = plain(said)
+        val n = Regex("\\d+").find(t)?.value?.toIntOrNull()
+        fun has(vararg w: String) = w.any { t.contains(it) }
+        val rest = { prefix: Regex -> said.replace(prefix, "").trim() }
+        val done = "Voz: \"$said\""
+        when {
+            t.matches(Regex("^(pesquisar|pesquisa|procurar|procura|buscar|busca|digitar|digita|escrever|escreve)\\b.*")) -> {
+                sendText(rest(Regex("^\\S+\\s*(por\\s+)?", RegexOption.IGNORE_CASE))); return
+            }
+            t.matches(Regex("^(abrir|abre|abra|iniciar|inicia|entrar no|entrar na|ir para o|ir para a)\\b.*")) -> {
+                val app = rest(Regex("^(abrir|abre|abra|iniciar|inicia|entrar n[oa]|ir para [oa])\\s*(o |a )?", RegexOption.IGNORE_CASE))
+                val saved = loadApps().firstOrNull { plain(it.first).filter(Char::isLetterOrDigit) == plain(app).filter(Char::isLetterOrDigit) }
+                if (irMode) { status.text = "Para abrir apps, troque para Wi-Fi"; return }
+                tv.launch(saved?.first ?: app, saved?.second ?: ""); return
+            }
+            has("desliga", "ligar", "liga a tv") -> { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
+            has("tirar o mudo", "tira o mudo", "mudo", "silencia", "som de volta") -> press("KEY_MUTE")
+            has("aumenta", "mais alto", "sobe o volume", "subir o volume", "volume mais") -> pressTimes("KEY_VOLUP", n ?: 3)
+            has("diminui", "abaixa", "baixa o volume", "mais baixo", "volume menos") -> pressTimes("KEY_VOLDOWN", n ?: 3)
+            has("proximo canal", "canal acima", "sobe canal", "subir canal") -> press("KEY_CHUP")
+            has("canal anterior", "canal abaixo", "desce canal", "descer canal") -> press("KEY_CHDOWN")
+            t.startsWith("canal") && n != null -> n.toString().forEachIndexed { i, c -> handler.postDelayed({ press("KEY_$c") }, i * 250L) }
+            has("voltar", "volta") -> press("KEY_RETURN")
+            has("inicio", "home", "tela inicial") -> press("KEY_HOME")
+            has("menu", "configurac") -> press("KEY_MENU")
+            has("fonte", "entrada", "hdmi") -> press("KEY_SOURCE")
+            has("cima", "sobe") -> pressTimes("KEY_UP", n ?: 1)
+            has("baixo", "desce") -> pressTimes("KEY_DOWN", n ?: 1)
+            has("esquerda") -> pressTimes("KEY_LEFT", n ?: 1)
+            has("direita") -> pressTimes("KEY_RIGHT", n ?: 1)
+            t == "ok" || has("confirma", "enter", "seleciona") -> press("KEY_ENTER")
+            tvKeyboardOpen -> { sendText(said); return }
+            else -> { status.text = "Não entendi: \"$said\". Tente \"abrir Netflix\", \"aumentar volume\", \"pesquisar …\""; return }
+        }
+        status.text = done
     }
 
     // ---------- Atalhos de apps ----------

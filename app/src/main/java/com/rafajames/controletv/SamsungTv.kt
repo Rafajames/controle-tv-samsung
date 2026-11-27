@@ -37,6 +37,8 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     /** Apps instalados na TV: nome, appId, tipo */
     @Volatile var installed: List<Triple<String, String, Int>> = emptyList(); private set
     private var ws: WebSocket? = null
+    /** Avisado quando a TV abre (true) ou fecha (false) o teclado dela. */
+    @Volatile var onIme: ((Boolean) -> Unit)? = null
 
     // A TV usa certificado próprio: aceitamos qualquer um (só falamos com a TV da rede local)
     private val client: OkHttpClient = run {
@@ -90,6 +92,8 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
                         }.filter { it.second.isNotEmpty() }.sortedBy { it.first.lowercase() }
                         runPendingLaunch()
                     }
+                    "ms.remote.imeStart" -> onIme?.invoke(true)
+                    "ms.remote.imeEnd" -> onIme?.invoke(false)
                     "ms.channel.unauthorized" -> {
                         connecting = false
                         status("A TV recusou. Toque num botão e aceite o aviso na TV")
@@ -113,10 +117,20 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         connected = false; connecting = false
     }
 
-    fun key(k: String) {
-        val params = JSONObject()
-            .put("Cmd", "Click").put("DataOfCmd", k)
-            .put("Option", "false").put("TypeOfRemote", "SendRemoteKey")
+    /** cmd: "Click" (apertar e soltar), "Press" (segurar) ou "Release" (soltar). */
+    fun key(k: String, cmd: String = "Click") = control(JSONObject()
+        .put("Cmd", cmd).put("DataOfCmd", k)
+        .put("Option", "false").put("TypeOfRemote", "SendRemoteKey"))
+
+    /** Escreve no campo de texto aberto na TV (navegador, pesquisa…). */
+    fun text(t: String) = control(JSONObject()
+        .put("Cmd", Base64.encodeToString(t.toByteArray(), Base64.NO_WRAP))
+        .put("DataOfCmd", "base64").put("TypeOfRemote", "SendInputString"))
+
+    /** Confirma o texto e fecha o teclado da TV. */
+    fun textEnd() = control(JSONObject().put("Cmd", "").put("DataOfCmd", "").put("TypeOfRemote", "SendInputEnd"))
+
+    private fun control(params: JSONObject) {
         val msg = JSONObject().put("method", "ms.remote.control").put("params", params).toString()
         if (connected) ws?.send(msg) else { pending = msg; connect() }
     }
@@ -181,9 +195,15 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         }
     }
 
+    /** Modelo da TV e se ela aceita comando de voz (vem da própria TV). */
+    @Volatile var model: String? = null; private set
+    @Volatile var voiceSupport: Boolean? = null; private set
+
     private fun learnMac(host: String) {
-        info(host, 3000)?.optJSONObject("device")?.optString("wifiMac")
-            ?.takeIf { it.count { c -> c == ':' } == 5 }
+        val dev = info(host, 3000)?.optJSONObject("device") ?: return
+        model = dev.optString("modelName").ifEmpty { null }
+        voiceSupport = dev.optString("VoiceSupport").takeIf { it.isNotEmpty() }?.toBoolean()
+        dev.optString("wifiMac").takeIf { it.count { c -> c == ':' } == 5 }
             ?.let { prefs.edit().putString("mac", it).apply() }
     }
 
