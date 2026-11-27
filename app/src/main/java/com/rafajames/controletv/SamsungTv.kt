@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -190,9 +191,37 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         val appId = app?.id ?: id.ifEmpty { null }
         if (appId == null) { status("Não achei \"$name\" na TV. Segure o atalho para escolher o app"); return }
         val type = if (app?.type == 4) "NATIVE_LAUNCH" else "DEEP_LINK"
-        ws?.send(emit("ed.apps.launch", JSONObject().put("appId", appId).put("action_type", type)))
-        status("Abrindo $name")
+        thread { openApp(name, appId, type) }
     }
+
+    /** Avisado quando o app não existe na TV (404), para escolher o certo na lista. */
+    @Volatile var onLaunchFailed: ((String) -> Unit)? = null
+
+    /**
+     * TVs 2021+ ignoram o "ed.apps.launch" do WebSocket; o que funciona é o REST da TV
+     * (POST /api/v2/applications/<id>), que responde 200 = abriu, 404 = não instalado.
+     */
+    private fun openApp(name: String, appId: String, type: String) {
+        val host = ip ?: return
+        var code = rest("http://$host:8001/api/v2/applications/$appId")
+        if (code != 200 && code != 404) code = rest("https://$host:8002/api/v2/applications/$appId")
+        when (code) {
+            200 -> status("Abrindo $name")
+            404 -> { status("$name não está instalado nesta TV"); onLaunchFailed?.invoke(name) }
+            else -> {
+                // TVs mais antigas: método pelo WebSocket
+                ws?.send(emit("ed.apps.launch", JSONObject().put("appId", appId).put("action_type", type)))
+                status(if (code == -1) "Abrindo $name pelo método antigo (a TV não respondeu ao novo)"
+                       else "A TV respondeu $code ao abrir $name; tentei o método antigo")
+            }
+        }
+    }
+
+    /** POST vazio; devolve o código HTTP ou -1 se não conectou. */
+    private fun rest(url: String): Int = runCatching {
+        client.newCall(Request.Builder().url(url).post(ByteArray(0).toRequestBody()).build())
+            .execute().use { it.code }
+    }.getOrDefault(-1)
 
     /** Acha o app da TV pelo nome do atalho (igual ou parecido). */
     fun findApp(name: String): TvApp? {
