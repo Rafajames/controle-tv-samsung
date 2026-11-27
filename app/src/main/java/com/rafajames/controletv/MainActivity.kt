@@ -291,8 +291,8 @@ class MainActivity : Activity() {
         val n = tv.installed.size
         val tvApps = Button(this).apply {
             isAllCaps = false
-            text = if (n > 0) "Ver apps da TV ($n)" else "Apps da TV: nenhum ainda (conecte com a TV ligada)"
-            isEnabled = n > 0
+            text = if (n > 0) "Ver apps da TV ($n · via ${tv.appsSource})"
+                else "Apps da TV: nenhum ainda (toque para procurar)" + (tv.lastError?.let { "\nErro da TV: $it" } ?: "")
         }
         val volKeys = CheckBox(this).apply { text = "Botões de volume do celular controlam a TV"; isChecked = prefs.getBoolean("volKeys", true) }
         val notif = CheckBox(this).apply { text = "Volume e pausa na notificação (fora do app)"; isChecked = prefs.getBoolean("notif", true) }
@@ -324,8 +324,10 @@ class MainActivity : Activity() {
         tvApps.setOnClickListener {
             dialog.dismiss()
             val apps = tv.installed
-            AlertDialog.Builder(this).setTitle("Apps da TV (toque para abrir)")
+            if (apps.isEmpty()) { status.text = "Procurando apps na TV…"; tv.refreshApps(); return@setOnClickListener }
+            AlertDialog.Builder(this).setTitle("Apps da TV · via ${tv.appsSource}")
                 .setAdapter(appAdapter(apps.map { it.name to it.id })) { _, w -> tv.launch(apps[w].name, apps[w].id) }
+                .setNeutralButton("Atualizar") { _, _ -> status.text = "Atualizando apps da TV…"; tv.refreshApps() }
                 .setNegativeButton("Fechar", null).show()
         }
     }

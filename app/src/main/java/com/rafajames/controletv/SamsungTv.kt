@@ -93,7 +93,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
                             ?.let { prefs.edit().putString("token", it).apply() }
                         status("Conectado à TV")
                         pending?.let { webSocket.send(it) }; pending = null
-                        webSocket.send(emit("ed.installedApp.get", null))
+                        refreshApps()
                         thread { Thread.sleep(2500); runPendingLaunch() }
                         learnMac(host)
                     }
@@ -103,6 +103,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
                             val a = arr.getJSONObject(it)
                             TvApp(a.optString("name"), a.optString("appId"), a.optInt("app_type", 2), a.optString("icon"))
                         }.filter { it.id.isNotEmpty() }.sortedBy { it.name.lowercase() }
+                        if (installed.isNotEmpty()) { gotList = true; appsSource = "TV" }
                         runPendingLaunch()
                         // Pede à TV o ícone de cada app que ainda não está guardado no celular
                         installed.filter { it.icon.isNotEmpty() && !iconFile(it.id).exists() }.forEach {
@@ -116,6 +117,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
                         runCatching { iconFile(app.id).writeBytes(Base64.decode(img, Base64.DEFAULT)) }
                             .onSuccess { onIcon?.invoke() }
                     }
+                    "ms.error" -> lastError = msg.optJSONObject("data")?.optString("message")?.ifEmpty { null } ?: text.take(120)
                     "ms.remote.imeStart" -> onIme?.invoke(true)
                     "ms.remote.imeEnd" -> onIme?.invoke(false)
                     "ms.channel.unauthorized" -> {
@@ -227,17 +229,104 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     /** Avisado quando um código conhecido funcionou, para o atalho guardar esse código. */
     @Volatile var onResolved: ((String, String) -> Unit)? = null
 
+    /** App conhecido: nome, chave (para casar com o nome do atalho) e códigos possíveis na TV. */
+    private class Known(val name: String, val key: String, val ids: List<String>)
+
     /** Códigos conhecidos de apps em TVs Samsung (nem todos existem em todo modelo/país). */
-    private val knownIds = mapOf(
-        "netflix" to listOf("3201907018807", "11101200001"),
-        "youtube" to listOf("111299001912"),
-        "primevideo" to listOf("3201910019365", "3201512006785", "org.tizen.ignition"),
-        "disney" to listOf("3201901017640", "MCmYXNxgcu.DisneyPlus"),
-        "browser" to listOf("org.tizen.browser", "3201907018784"),
-        "internet" to listOf("org.tizen.browser", "3201907018784"),
-        "spotify" to listOf("3201606009684"),
-        "appletv" to listOf("3201807016597"),
+    private val catalog = listOf(
+        Known("Netflix", "netflix", listOf("3201907018807", "11101200001")),
+        Known("YouTube", "youtube", listOf("111299001912")),
+        Known("Prime Video", "primevideo", listOf("3201910019365", "3201512006785", "org.tizen.ignition")),
+        Known("Disney+", "disney", listOf("3201901017640", "MCmYXNxgcu.DisneyPlus")),
+        Known("Internet", "internet", listOf("org.tizen.browser", "3201907018784")),
+        Known("Spotify", "spotify", listOf("3201606009684")),
+        Known("Apple TV", "appletv", listOf("3201807016597")),
+        Known("Globoplay", "globoplay", listOf("3201908019041", "3201512006897")),
+        Known("Max", "max", listOf("3202301029760", "3201601007230")),
+        Known("Crunchyroll", "crunchyroll", listOf("3201710015067")),
+        Known("Paramount+", "paramount", listOf("3201710014874")),
+        Known("Pluto TV", "pluto", listOf("3201808016802")),
+        Known("Samsung TV Plus", "tvplus", listOf("3201710015037")),
+        Known("Deezer", "deezer", listOf("3201608010191")),
+        Known("Twitch", "twitch", listOf("3202203026841")),
+        Known("Plex", "plex", listOf("3201512006963")),
+        Known("Apple Music", "applemusic", listOf("3201908019022")),
+        Known("YouTube Kids", "youtubekids", listOf("3201611010983")),
+        Known("YouTube TV", "youtubetv", listOf("3201707014489")),
+        Known("Tubi", "tubi", listOf("3201504001965")),
+        Known("TuneIn", "tunein", listOf("121299000101")),
+        Known("Facebook Watch", "facebook", listOf("11091000000")),
+        Known("Steam Link", "steam", listOf("3201702011851")),
+        Known("Star+", "star", listOf("3202101022562")),
+        Known("Telecine", "telecine", listOf("3201704012147")),
+        Known("Discovery+", "discovery", listOf("3202010022079")),
+        Known("Amazon Music", "amazonmusic", listOf("3201905018355")),
+        Known("SmartThings", "smartthings", listOf("3201710015106")),
+        Known("Galeria", "galeria", listOf("3201710015016")),
     )
+    private val knownIds = catalog.associate { it.key to it.ids } + ("browser" to listOf("org.tizen.browser", "3201907018784"))
+
+    /** De onde veio a lista de apps: "TV", "sondagem" ou "nenhuma". */
+    @Volatile var appsSource = "nenhuma"; private set
+    /** Último erro que a TV mandou (ms.error), para o diagnóstico no ⚙. */
+    @Volatile var lastError: String? = null; private set
+    @Volatile private var gotList = false
+    @Volatile private var appsGen = 0
+
+    /**
+     * Pede a lista de apps. Se a TV não responder em 3 s, pede de novo;
+     * se continuar calada (comum em TVs 2021+), pergunta app por app (sondagem).
+     */
+    fun refreshApps() {
+        if (!connected) { connect(); return }
+        val gen = ++appsGen
+        gotList = false
+        ws?.send(emit("ed.installedApp.get", null))
+        thread {
+            Thread.sleep(3000); if (gen != appsGen || gotList) return@thread
+            ws?.send(emit("ed.installedApp.get", null))
+            Thread.sleep(3000); if (gen != appsGen || gotList) return@thread
+            probeApps(gen)
+        }
+    }
+
+    /** GET /api/v2/applications/<id>: 200 = instalado (com o nome real), 404 = não. */
+    private fun probeApps(gen: Int) {
+        val host = ip ?: return
+        status("Procurando apps na TV…")
+        val found = java.util.concurrent.ConcurrentLinkedQueue<TvApp>()
+        val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+        val pool = Executors.newFixedThreadPool(6)
+        catalog.forEach { k -> pool.execute {
+            for (id in k.ids) {
+                var (code, body) = get("http://$host:8001/api/v2/applications/$id")
+                if (code != 200 && code != 404) get("https://$host:8002/api/v2/applications/$id").let { code = it.first; body = it.second }
+                if (code == 200 || code == 404) answered.set(true)
+                if (code == 200) {
+                    val name = runCatching { JSONObject(body).optString("name") }.getOrNull()?.ifEmpty { null } ?: k.name
+                    found.add(TvApp(name, id, 2, "")); break
+                }
+            }
+        } }
+        pool.shutdown()
+        pool.awaitTermination(40, TimeUnit.SECONDS)
+        if (gen != appsGen || gotList) return
+        if (found.isEmpty()) {
+            appsSource = "nenhuma"
+            status(if (answered.get()) "A TV não tem nenhum dos apps conhecidos" else "A TV não respondeu à busca de apps")
+            return
+        }
+        installed = found.distinctBy { it.id }.sortedBy { it.name.lowercase() }
+        appsSource = "sondagem"
+        status("Encontrei ${installed.size} apps na TV")
+        onIcon?.invoke()  // redesenha os atalhos
+        runPendingLaunch()
+    }
+
+    /** GET; devolve (código HTTP, corpo) ou (-1, "") se não conectou. */
+    private fun get(url: String): Pair<Int, String> = runCatching {
+        client.newCall(Request.Builder().url(url).get().build()).execute().use { it.code to (it.body?.string() ?: "") }
+    }.getOrDefault(-1 to "")
 
     /** POST vazio; devolve o código HTTP ou -1 se não conectou. */
     private fun rest(url: String): Int = runCatching {
