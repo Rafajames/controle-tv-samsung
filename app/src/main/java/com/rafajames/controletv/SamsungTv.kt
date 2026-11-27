@@ -33,6 +33,9 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     @Volatile var connected = false; private set
     @Volatile private var connecting = false
     @Volatile private var pending: String? = null
+    @Volatile private var pendingLaunch: Pair<String, String>? = null
+    /** Apps instalados na TV: nome, appId, tipo */
+    @Volatile var installed: List<Triple<String, String, Int>> = emptyList(); private set
     private var ws: WebSocket? = null
 
     // A TV usa certificado próprio: aceitamos qualquer um (só falamos com a TV da rede local)
@@ -74,8 +77,18 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
                         msg.optJSONObject("data")?.optString("token")?.takeIf { it.isNotEmpty() }
                             ?.let { prefs.edit().putString("token", it).apply() }
                         status("Conectado à TV")
-                        pending?.let { send(it) }; pending = null
+                        pending?.let { webSocket.send(it) }; pending = null
+                        webSocket.send(emit("ed.installedApp.get", null))
+                        thread { Thread.sleep(2500); runPendingLaunch() }
                         learnMac(host)
+                    }
+                    "ed.installedApp.get" -> {
+                        val arr = msg.optJSONObject("data")?.optJSONArray("data")
+                        if (arr != null) installed = (0 until arr.length()).map {
+                            val a = arr.getJSONObject(it)
+                            Triple(a.optString("name"), a.optString("appId"), a.optInt("app_type", 2))
+                        }.filter { it.second.isNotEmpty() }.sortedBy { it.first.lowercase() }
+                        runPendingLaunch()
                     }
                     "ms.channel.unauthorized" -> {
                         connecting = false
@@ -101,15 +114,41 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     }
 
     fun key(k: String) {
-        if (connected) send(k) else { pending = k; connect() }
-    }
-
-    private fun send(k: String) {
         val params = JSONObject()
             .put("Cmd", "Click").put("DataOfCmd", k)
             .put("Option", "false").put("TypeOfRemote", "SendRemoteKey")
-        ws?.send(JSONObject().put("method", "ms.remote.control").put("params", params).toString())
+        val msg = JSONObject().put("method", "ms.remote.control").put("params", params).toString()
+        if (connected) ws?.send(msg) else { pending = msg; connect() }
     }
+
+    private fun send(k: String) = key(k)
+
+    private fun emit(event: String, data: JSONObject?) = JSONObject().put("method", "ms.channel.emit")
+        .put("params", JSONObject().put("event", event).put("to", "host").apply { data?.let { put("data", it) } })
+        .toString()
+
+    /** Abre um app na TV. Procura o ID pelo nome na lista da TV; se não achar, usa o ID salvo. */
+    fun launch(name: String, id: String) {
+        if (ip == null) { status("Toque em ⚙ para achar a TV no Wi-Fi primeiro"); return }
+        pendingLaunch = name to id
+        if (connected) runPendingLaunch() else { status("Abrindo $name pela rede…"); connect() }
+    }
+
+    @Synchronized private fun runPendingLaunch() {
+        val (name, id) = pendingLaunch ?: return
+        if (!connected) return
+        pendingLaunch = null
+        val n = norm(name)
+        val app = installed.firstOrNull { norm(it.first) == n }
+            ?: installed.firstOrNull { norm(it.first).contains(n) || n.contains(norm(it.first)) }
+        val appId = app?.second ?: id.ifEmpty { null }
+        if (appId == null) { status("Não achei \"$name\" na TV. Segure o atalho para escolher o app"); return }
+        val type = if (app?.third == 4) "NATIVE_LAUNCH" else "DEEP_LINK"
+        ws?.send(emit("ed.apps.launch", JSONObject().put("appId", appId).put("action_type", type)))
+        status("Abrindo $name")
+    }
+
+    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
 
     /** Ligado: desliga. Desligado: manda Wake-on-LAN e tenta conectar. */
     fun power() {

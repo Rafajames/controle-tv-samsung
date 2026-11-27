@@ -1,6 +1,6 @@
 # Controle TV Samsung
 
-Controle remoto Android para TVs Samsung Tizen (2016+), via Wi‑Fi. Não precisa de infravermelho nem do SmartThings.
+Controle remoto Android para TVs Samsung: por **infravermelho** (celulares com IR, como o Poco F3) ou **Wi‑Fi** (Tizen 2016+). Tem atalhos de apps (Netflix, Prime Video, Disney+, Crunchyroll, Xbox e outros que você adicionar).
 
 **Baixar:** https://github.com/Rafajames/controle-tv-samsung/releases/latest/download/controle-tv.apk
 
