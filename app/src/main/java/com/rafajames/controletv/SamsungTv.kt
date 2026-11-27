@@ -154,6 +154,13 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         .put("Cmd", Base64.encodeToString(t.toByteArray(), Base64.NO_WRAP))
         .put("DataOfCmd", "base64").put("TypeOfRemote", "SendInputString"))
 
+    /** Move o cursor do mouse da TV (navegador) em pixels relativos. */
+    fun mouseMove(dx: Int, dy: Int) = control(JSONObject().put("Cmd", "Move")
+        .put("Position", JSONObject().put("x", dx).put("y", dy).put("Time", System.currentTimeMillis().toString()))
+        .put("TypeOfRemote", "ProcessMouseDevice"))
+
+    fun mouseClick() = control(JSONObject().put("Cmd", "LeftClick").put("TypeOfRemote", "ProcessMouseDevice"))
+
     /** Confirma o texto e fecha o teclado da TV. */
     fun textEnd() = control(JSONObject().put("Cmd", "").put("DataOfCmd", "").put("TypeOfRemote", "SendInputEnd"))
 

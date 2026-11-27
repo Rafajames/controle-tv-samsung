@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget da tela inicial (só views suportadas por RemoteViews) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent"
+    android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center"
+    android:padding="6dp" android:background="@drawable/widget_bg">
+    <ImageButton android:id="@+id/wPower" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"
+        android:layout_margin="3dp" android:background="@drawable/btn_power_rect" android:src="@drawable/ic_power" android:contentDescription="Ligar ou desligar" />
+    <ImageButton android:id="@+id/wVolDown" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"
+        android:layout_margin="3dp" android:background="@drawable/btn" android:src="@drawable/ic_remove" android:contentDescription="Diminuir volume" />
+    <ImageButton android:id="@+id/wMute" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"
+        android:layout_margin="3dp" android:background="@drawable/btn" android:src="@drawable/ic_mute" android:contentDescription="Mudo" />
+    <ImageButton android:id="@+id/wVolUp" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"
+        android:layout_margin="3dp" android:background="@drawable/btn" android:src="@drawable/ic_add" android:contentDescription="Aumentar volume" />
+    <ImageButton android:id="@+id/wPlay" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"
+        android:layout_margin="3dp" android:background="@drawable/btn" android:src="@drawable/ic_playpause" android:contentDescription="Pausar ou continuar" />
+    <ImageButton android:id="@+id/wOpen" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"
+        android:layout_margin="3dp" android:background="@drawable/btn" android:src="@drawable/ic_dpad" android:contentDescription="Abrir o controle" />
+</LinearLayout>

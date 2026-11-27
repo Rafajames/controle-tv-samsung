@@ -46,6 +46,12 @@
         <item name="android:scaleType">center</item>
         <item name="android:stateListAnimator">@animator/press</item>
     </style>
+    <!-- Botões pequenos nos cantos do direcional (mídia e touchpad) -->
+    <style name="CornerBtn" parent="RoundBtn">
+        <item name="android:layout_width">50dp</item>
+        <item name="android:layout_height">50dp</item>
+        <item name="android:layout_margin">2dp</item>
+    </style>
     <!-- Setas dentro do anel do direcional -->
     <style name="DpadBtn">
         <item name="android:layout_width">76dp</item>

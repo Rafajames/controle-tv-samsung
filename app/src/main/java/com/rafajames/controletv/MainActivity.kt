@@ -17,6 +17,10 @@ import android.widget.RadioGroup
 import android.content.ActivityNotFoundException
 import android.speech.RecognizerIntent
 import android.view.KeyEvent
+import android.view.DragEvent
+import android.os.SystemClock
+import android.widget.CheckBox
+import android.widget.ImageButton
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import java.text.Normalizer
@@ -58,7 +62,7 @@ class MainActivity : Activity() {
         get() = ir.available && prefs.getBoolean("ir", true)
         set(v) { prefs.edit().putBoolean("ir", v).apply() }
     private val handler = Handler(Looper.getMainLooper())
-    private val repeatKeys = setOf("KEY_VOLUP", "KEY_VOLDOWN", "KEY_UP", "KEY_DOWN", "KEY_LEFT", "KEY_RIGHT")
+    private val repeatKeys = setOf("KEY_VOLUP", "KEY_VOLDOWN", "KEY_UP", "KEY_DOWN", "KEY_LEFT", "KEY_RIGHT", "KEY_REWIND", "KEY_FF")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,6 +84,18 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.power).setOnClickListener { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
         findViewById<View>(R.id.dialpad).setOnClickListener { buzz(); showNumpad() }
         fitDpad()
+        findViewById<View>(R.id.playPause).setOnClickListener {
+            buzz()
+            val playing = prefs.getBoolean("playing", true)
+            press(if (playing) "KEY_PAUSE" else "KEY_PLAY")
+            prefs.edit().putBoolean("playing", !playing).apply()
+        }
+        setupTouchPad()
+        if (Build.VERSION.SDK_INT >= 33 && prefs.getBoolean("notif", true) && !prefs.getBoolean("askedNotif", false) &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            prefs.edit().putBoolean("askedNotif", true).apply()
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9)
+        }
         segIr.setOnClickListener {
             buzz()
             if (!ir.available) { status.text = "Este celular não tem infravermelho"; return@setOnClickListener }
@@ -171,8 +187,66 @@ class MainActivity : Activity() {
         pendingUpdate?.let { if (packageManager.canRequestPackageInstalls()) startUpdate(it) }
     }
     override fun onPause() { super.onPause(); resumed = false }
-    override fun onStart() { super.onStart(); if (!irMode) tv.connect() }
-    override fun onStop() { super.onStop(); tv.disconnect() }
+    override fun onStart() { super.onStart(); RemoteReceiver.hideNotification(this); if (!irMode) tv.connect() }
+    override fun onStop() {
+        super.onStop(); tv.disconnect()
+        // Fora do app: volume e pausa ficam na notificação (e na tela de bloqueio)
+        if (prefs.getBoolean("notif", true) && (Build.VERSION.SDK_INT < 33 ||
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED))
+            RemoteReceiver.showNotification(this)
+    }
+
+    // ---------- Botões de volume do celular controlam a TV ----------
+
+    private var lastVolKey = 0L
+    private fun volKey(keyCode: Int) = if (!prefs.getBoolean("volKeys", true)) null else when (keyCode) {
+        KeyEvent.KEYCODE_VOLUME_UP -> "KEY_VOLUP"; KeyEvent.KEYCODE_VOLUME_DOWN -> "KEY_VOLDOWN"; else -> null
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        val key = volKey(keyCode) ?: return super.onKeyDown(keyCode, event)
+        val now = SystemClock.uptimeMillis()
+        if (event.repeatCount == 0 || now - lastVolKey >= 120) {
+            lastVolKey = now; buzz(if (event.repeatCount == 0) Buzz.CLICK else Buzz.TICK); press(key)
+        }
+        return true
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        if (volKey(keyCode) != null) true else super.onKeyUp(keyCode, event)
+
+    // ---------- Touchpad ----------
+
+    private fun setupTouchPad() {
+        val touch = findViewById<TouchPad>(R.id.touchpad)
+        showTouchPad(prefs.getBoolean("touchpad", false))
+        findViewById<View>(R.id.padToggle).setOnClickListener { buzz(); showTouchPad(touch.visibility != View.VISIBLE) }
+        touch.onArrow = { k -> buzz(Buzz.TICK); press(k) }
+        touch.onTap = {
+            buzz()
+            if (!touch.mouse) press("KEY_ENTER")
+            else if (irMode) status.text = "O mouse só funciona no Wi-Fi" else tv.mouseClick()
+        }
+        touch.onMouse = { dx, dy -> if (!irMode) tv.mouseMove(dx, dy) }
+        touch.onToggleMode = {
+            buzz(Buzz.HEAVY)
+            if (irMode && !touch.mouse) status.text = "O modo mouse só funciona no Wi-Fi: toque em Wi-Fi no topo"
+            else {
+                touch.mouse = !touch.mouse
+                status.text = if (touch.mouse) "Modo mouse: use no navegador da TV" else "Modo setas: deslize para navegar"
+            }
+        }
+    }
+
+    private fun showTouchPad(on: Boolean) {
+        findViewById<View>(R.id.touchpad).visibility = if (on) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.dpad).visibility = if (on) View.GONE else View.VISIBLE
+        findViewById<ImageButton>(R.id.padToggle).apply {
+            setImageResource(if (on) R.drawable.ic_dpad else R.drawable.ic_touch)
+            contentDescription = if (on) "Voltar ao direcional" else "Trocar para touchpad"
+        }
+        prefs.edit().putBoolean("touchpad", on).apply()
+    }
 
     /** Todo botão com android:tag="KEY_..." envia essa tecla. */
     private fun wire(v: View) {
@@ -236,11 +310,14 @@ class MainActivity : Activity() {
         val chosen = { vibrate.checkedRadioButtonId - 100 }
         val test = Button(this).apply { text = "Testar vibração"; isAllCaps = false; setOnClickListener { buzz(level = chosen()) } }
         val update = Button(this).apply { text = "Verificar atualização (versão $myVersion)"; isAllCaps = false }
+        val volKeys = CheckBox(this).apply { text = "Botões de volume do celular controlam a TV"; isChecked = prefs.getBoolean("volKeys", true) }
+        val notif = CheckBox(this).apply { text = "Volume e pausa na notificação (fora do app)"; isChecked = prefs.getBoolean("notif", true) }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
             addView(input)
             addView(TextView(context).apply { text = "Vibração ao tocar"; setPadding(0, dp(12), 0, 0) })
-            addView(vibrate); addView(test); addView(update)
+            addView(vibrate); addView(test)
+            addView(volKeys); addView(notif); addView(update)
         }
         val dialog = AlertDialog.Builder(this)
             .setTitle("Configurações")
@@ -249,6 +326,10 @@ class MainActivity : Activity() {
             .setView(box)
             .setPositiveButton("Salvar") { _, _ ->
                 hapticLevel = chosen()
+                prefs.edit().putBoolean("volKeys", volKeys.isChecked).putBoolean("notif", notif.isChecked).apply()
+                if (notif.isChecked && Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9)
                 val ip = input.text.toString().trim()
                 if (ip.isNotEmpty()) { tv.setIp(ip); tv.connect() }
             }
@@ -269,10 +350,10 @@ class MainActivity : Activity() {
 
     /** O direcional diminui se a tela for baixa, para tudo caber sem rolar. */
     private fun fitDpad() {
-        val pad = findViewById<View>(R.id.dpad)
+        val pads = listOf(findViewById<View>(R.id.dpad), findViewById<View>(R.id.touchpad))
         findViewById<View>(R.id.dpadBox).addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
             val s = ((bottom - top - dp(8)) / dp(264).toFloat()).coerceIn(0.5f, 1f)
-            pad.scaleX = s; pad.scaleY = s
+            pads.forEach { it.scaleX = s; it.scaleY = s }
         }
     }
 
@@ -393,9 +474,9 @@ class MainActivity : Activity() {
             }
             t.matches(Regex("^(abrir|abre|abra|iniciar|inicia|entrar no|entrar na|ir para o|ir para a)\\b.*")) -> {
                 val app = rest(Regex("^(abrir|abre|abra|iniciar|inicia|entrar n[oa]|ir para [oa])\\s*(o |a )?", RegexOption.IGNORE_CASE))
-                val saved = loadApps().firstOrNull { plain(it.first).filter(Char::isLetterOrDigit) == plain(app).filter(Char::isLetterOrDigit) }
+                val saved = loadApps().firstOrNull { plain(it.name).filter(Char::isLetterOrDigit) == plain(app).filter(Char::isLetterOrDigit) }
                 if (irMode) { status.text = "Para abrir apps, troque para Wi-Fi"; return }
-                tv.launch(saved?.first ?: app, saved?.second ?: ""); return
+                if (saved != null) openShortcut(saved) else tv.launch(app, ""); return
             }
             has("desliga", "ligar", "liga a tv") -> { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
             has("tirar o mudo", "tira o mudo", "mudo", "silencia", "som de volta") -> press("KEY_MUTE")
@@ -428,15 +509,18 @@ class MainActivity : Activity() {
         {"name":"Crunchyroll","id":""},
         {"name":"Xbox","id":"3202203026799"}]"""
 
-    private fun loadApps(): MutableList<Pair<String, String>> {
+    /** Atalho de app. power = "cena": liga a TV antes de abrir o app. */
+    private data class Shortcut(val name: String, val id: String, val power: Boolean = false)
+
+    private fun loadApps(): MutableList<Shortcut> {
         val arr = JSONArray(prefs.getString("apps", null) ?: defaultApps)
-        return (0 until arr.length()).map { arr.getJSONObject(it).let { o -> o.getString("name") to o.optString("id") } }
+        return (0 until arr.length()).map { arr.getJSONObject(it).let { o -> Shortcut(o.getString("name"), o.optString("id"), o.optBoolean("power")) } }
             .toMutableList()
     }
 
-    private fun saveApps(list: List<Pair<String, String>>) {
+    private fun saveApps(list: List<Shortcut>) {
         val arr = JSONArray()
-        list.forEach { arr.put(JSONObject().put("name", it.first).put("id", it.second)) }
+        list.forEach { arr.put(JSONObject().put("name", it.name).put("id", it.id).put("power", it.power)) }
         prefs.edit().putString("apps", arr.toString()).apply()
         renderApps()
     }
@@ -469,7 +553,7 @@ class MainActivity : Activity() {
 
     private fun rounded(color: Int) = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(9).toFloat(); setColor(color) }
 
-    private fun tile(label: String, logo: View, click: () -> Unit, long: (() -> Unit)? = null) = LinearLayout(this).apply {
+    private fun tile(label: CharSequence, logo: View, click: () -> Unit, long: (() -> Unit)? = null) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = android.view.Gravity.CENTER
         background = getDrawable(R.drawable.btn)
@@ -516,8 +600,12 @@ class MainActivity : Activity() {
         val apps = loadApps()
         val shown = if (apps.size <= 7) apps.size else 7
         val cells = mutableListOf<View>()
-        apps.take(shown).forEachIndexed { i, (name, id) ->
-            cells += tile(name, logoView(name, id), { tv.launch(name, id) }, { editApp(i) })
+        apps.take(shown).forEachIndexed { i, sc ->
+            // Cena: bolinha vermelha antes do nome
+            val label = if (!sc.power) sc.name else android.text.SpannableString("● " + sc.name).apply {
+                setSpan(android.text.style.ForegroundColorSpan(0xFFE53935.toInt()), 0, 1, 0)
+            }
+            cells += tile(label, logoView(sc.name, sc.id), { openShortcut(sc) }).also { enableDrag(it, i) }
         }
         cells += if (apps.size > 7) tile("Mais", monogram("⋯", 0xFF3A4150.toInt()), { showAllApps() })
             else tile("Adicionar", monogram("+", 0xFF3A4150.toInt()), { addApp() })
@@ -528,25 +616,78 @@ class MainActivity : Activity() {
     private fun showAllApps() {
         val apps = loadApps()
         AlertDialog.Builder(this).setTitle("Apps")
-            .setItems(apps.map { it.first }.toTypedArray()) { _, w -> tv.launch(apps[w].first, apps[w].second) }
+            .setAdapter(appAdapter(apps.map { it.name to it.id })) { _, w -> openShortcut(apps[w]) }
             .setNeutralButton("Adicionar") { _, _ -> addApp() }
             .setNegativeButton("Editar") { _, _ ->
                 AlertDialog.Builder(this).setTitle("Editar qual?")
-                    .setItems(apps.map { it.first }.toTypedArray()) { _, w -> editApp(w) }.show()
+                    .setItems(apps.map { it.name }.toTypedArray()) { _, w -> editApp(w) }.show()
             }
             .show()
     }
 
+    /** Abre o app; se for "cena" e a TV estiver desligada, liga antes (Wake-on-LAN). */
+    private fun openShortcut(sc: Shortcut) {
+        if (sc.power && !tv.connected) {
+            status.text = "Ligando a TV e abrindo ${sc.name}…"
+            tv.power()
+        }
+        tv.launch(sc.name, sc.id)
+    }
+
+    /** Segurar e arrastar troca o atalho de lugar; segurar e soltar no mesmo lugar abre o menu. */
+    private fun enableDrag(v: View, index: Int) {
+        v.setOnLongClickListener {
+            buzz(Buzz.HEAVY)
+            v.startDragAndDrop(android.content.ClipData.newPlainText("atalho", index.toString()), View.DragShadowBuilder(v), index, 0)
+            true
+        }
+        v.setOnDragListener { view, e ->
+            when (e.action) {
+                DragEvent.ACTION_DRAG_ENTERED -> view.alpha = 0.5f
+                DragEvent.ACTION_DRAG_EXITED, DragEvent.ACTION_DRAG_ENDED -> view.alpha = 1f
+                DragEvent.ACTION_DROP -> {
+                    view.alpha = 1f
+                    val from = e.localState as? Int ?: return@setOnDragListener false
+                    if (from == index) editApp(index)
+                    else { buzz(); saveApps(loadApps().apply { add(index, removeAt(from)) }) }
+                }
+            }
+            true
+        }
+    }
+
+    /** Lista com a logo de cada app (usada para escolher apps da TV e na lista "Mais"). */
+    private fun appAdapter(items: List<Pair<String, String>>) = object : android.widget.BaseAdapter() {
+        override fun getCount() = items.size
+        override fun getItem(p: Int) = items[p]
+        override fun getItemId(p: Int) = p.toLong()
+        override fun getView(p: Int, convertView: View?, parent: ViewGroup) = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(22), dp(10), dp(22), dp(10))
+            addView(logoView(items[p].first, items[p].second), LinearLayout.LayoutParams(dp(34), dp(34)))
+            addView(TextView(context).apply { text = items[p].first; textSize = 16f; setPadding(dp(16), 0, 0, 0) })
+        }
+    }
+
     private fun editApp(i: Int) {
         val list = loadApps()
-        AlertDialog.Builder(this).setTitle(list[i].first)
-            .setItems(arrayOf("Escolher o app da TV", "Remover atalho")) { _, which ->
-                if (which == 0) pickFromTv { name, id -> list[i] = list[i].first to id; saveApps(list); toast("$name vinculado") }
-                else { list.removeAt(i); saveApps(list) }
+        val sc = list[i]
+        status.text = "Dica: segure e arraste um atalho para trocar de lugar"
+        AlertDialog.Builder(this).setTitle(sc.name)
+            .setItems(arrayOf("Escolher o app da TV",
+                if (sc.power) "Não ligar a TV junto" else "Ligar a TV e abrir (cena)", "Remover atalho")) { _, which ->
+                when (which) {
+                    0 -> pickFromTv { name, id -> list[i] = sc.copy(id = id); saveApps(list); toast("$name vinculado") }
+                    1 -> {
+                        list[i] = sc.copy(power = !sc.power); saveApps(list)
+                        status.text = if (!sc.power) "${sc.name}: agora liga a TV e abre o app" else "${sc.name}: só abre o app"
+                    }
+                    else -> { list.removeAt(i); saveApps(list) }
+                }
             }.show()
     }
 
-    private fun addApp() = pickFromTv { name, id -> saveApps(loadApps().apply { add(name to id) }) }
+    private fun addApp() = pickFromTv { name, id -> saveApps(loadApps().apply { add(Shortcut(name, id)) }) }
 
     /** Mostra os apps instalados na TV; se a lista não vier, pede nome e ID manualmente. */
     private fun pickFromTv(done: (String, String) -> Unit) {
@@ -558,7 +699,7 @@ class MainActivity : Activity() {
             manualApp(done); return
         }
         AlertDialog.Builder(this).setTitle("Apps da TV")
-            .setItems(apps.map { it.name }.toTypedArray()) { _, w -> done(apps[w].name, apps[w].id) }
+            .setAdapter(appAdapter(apps.map { it.name to it.id })) { _, w -> done(apps[w].name, apps[w].id) }
             .setNeutralButton("Digitar ID") { _, _ -> manualApp(done) }
             .show()
     }

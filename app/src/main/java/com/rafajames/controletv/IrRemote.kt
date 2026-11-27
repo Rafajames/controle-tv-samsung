@@ -18,6 +18,7 @@ class IrRemote(ctx: Context) {
         "KEY_ENTER" to 0x68, "KEY_RETURN" to 0x58, "KEY_HOME" to 0x79,
         "KEY_1" to 0x04, "KEY_2" to 0x05, "KEY_3" to 0x06, "KEY_4" to 0x08, "KEY_5" to 0x09,
         "KEY_6" to 0x0A, "KEY_7" to 0x0C, "KEY_8" to 0x0D, "KEY_9" to 0x0E, "KEY_0" to 0x11,
+        "KEY_PLAY" to 0x47, "KEY_PAUSE" to 0x4A, "KEY_STOP" to 0x46, "KEY_REWIND" to 0x45, "KEY_FF" to 0x48,
     )
 
     fun send(key: String) {

@@ -61,6 +61,18 @@
                 android:textStyle="bold" android:background="@drawable/btn_ok" android:elevation="4dp"
                 android:stateListAnimator="@animator/press" />
         </FrameLayout>
+        <!-- Touchpad (aparece no lugar do direcional) -->
+        <com.rafajames.controletv.TouchPad android:id="@+id/touchpad" android:layout_width="264dp" android:layout_height="264dp"
+            android:layout_gravity="center" android:visibility="gone" android:contentDescription="Touchpad" />
+        <!-- Cantos: mídia e troca direcional/touchpad -->
+        <ImageButton android:id="@+id/playPause" style="@style/CornerBtn" android:layout_gravity="top|start"
+            android:src="@drawable/ic_playpause" android:contentDescription="Pausar ou continuar" />
+        <ImageButton android:id="@+id/padToggle" style="@style/CornerBtn" android:layout_gravity="top|end"
+            android:src="@drawable/ic_touch" android:contentDescription="Trocar para touchpad" />
+        <ImageButton style="@style/CornerBtn" android:layout_gravity="bottom|start" android:tag="KEY_REWIND"
+            android:src="@drawable/ic_rewind" android:contentDescription="Voltar (retroceder)" />
+        <ImageButton style="@style/CornerBtn" android:layout_gravity="bottom|end" android:tag="KEY_FF"
+            android:src="@drawable/ic_forward" android:contentDescription="Avançar" />
         </FrameLayout>
 
         <LinearLayout style="@style/Row">
