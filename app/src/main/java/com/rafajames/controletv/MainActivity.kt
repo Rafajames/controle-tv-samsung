@@ -72,6 +72,11 @@ class MainActivity : Activity() {
         tv.onState = { st -> runOnUiThread { refreshPill(st) } }
         tv.onIcon = { runOnUiThread { scheduleRenderApps() } }
         tv.onLaunchFailed = { name -> runOnUiThread { relink(name) } }
+        // Um código conhecido funcionou: o atalho passa a usar esse código
+        tv.onResolved = { name, id -> runOnUiThread {
+            val list = loadApps(); val i = list.indexOfFirst { it.name == name }
+            if (i >= 0 && list[i].id != id) { list[i] = list[i].copy(id = id); saveApps(list) }
+        } }
         ir = IrRemote(this)
         appsRow = findViewById(R.id.apps)
         wire(findViewById(R.id.root))
@@ -94,6 +99,8 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.statusPill).setOnClickListener { buzz(); showConnection() }
         voiceButton(findViewById(R.id.voice))
         tv.onIme = { open -> runOnUiThread { tvKeyboardOpen = open; if (open && resumed) showKeyboard() else if (!open) keyboardDialog?.dismiss() } }
+        // Uma vez: atalhos iguais aos apps da TV (sai o Xbox, entram YouTube, TV Plus e Browser)
+        if (!prefs.getBoolean("appsV2", false)) prefs.edit().putString("apps", defaultApps).putBoolean("appsV2", true).apply()
         renderApps()
         applyMode()
         // Aviso automático de versão nova, no máximo uma vez por dia
@@ -525,7 +532,9 @@ class MainActivity : Activity() {
         {"name":"Prime Video","id":"3201910019365"},
         {"name":"Disney+","id":"3201901017640"},
         {"name":"Crunchyroll","id":""},
-        {"name":"Xbox","id":"3202203026799"}]"""
+        {"name":"YouTube","id":"111299001912"},
+        {"name":"Samsung TV Plus","id":""},
+        {"name":"Browser","id":"org.tizen.browser"}]"""
 
     /** Atalho de app. power = "cena": liga a TV antes de abrir o app. */
     private data class Shortcut(val name: String, val id: String, val power: Boolean = false)
@@ -554,7 +563,8 @@ class MainActivity : Activity() {
         "youtube" to (0xFFFF0000 to "▶"), "globoplay" to (0xFFFF1E4F to "g"), "max" to (0xFF002BE7 to "max"),
         "hbo" to (0xFF5822B4 to "HBO"), "spotify" to (0xFF1DB954 to "S"), "twitch" to (0xFF9146FF to "T"),
         "paramount" to (0xFF0064FF to "P+"), "appletv" to (0xFF1C1C1E to "tv"), "pluto" to (0xFF2D2D2D to "P"),
-        "deezer" to (0xFFA238FF to "D"), "starplus" to (0xFF0E2A8C to "D+")
+        "deezer" to (0xFFA238FF to "D"), "starplus" to (0xFF0E2A8C to "D+"),
+        "tvplus" to (0xFF1428A0 to "TV+"), "browser" to (0xFF3949AB to "www"), "internet" to (0xFF3949AB to "www")
     )
     private val palette = intArrayOf(0xFF5C6BC0.toInt(), 0xFF26A69A.toInt(), 0xFFAB47BC.toInt(), 0xFFEF6C00.toInt(), 0xFF8D6E63.toInt())
 
@@ -595,11 +605,11 @@ class MainActivity : Activity() {
     /** Junta vários ícones que chegam juntos numa só atualização da tela. */
     private fun scheduleRenderApps() { handler.removeCallbacks(renderAppsRunnable); handler.postDelayed(renderAppsRunnable, 300) }
 
-    /** Uma linha de logos: até 6 apps + "Adicionar" (ou "Mais apps" se tiver mais de 6). */
+    /** Uma linha de logos: até 7 apps + "Adicionar" (ou "Todos os apps" se tiver mais de 7). */
     private fun renderApps() {
         appsRow.removeAllViews()
         val apps = loadApps()
-        val slots = 7
+        val slots = 8
         val shown = if (apps.size < slots) apps.size else slots - 1
         apps.take(shown).forEachIndexed { i, sc ->
             appsRow.addView(appTile(sc.name, logoView(sc.name, sc.id), sc.power) { openShortcut(sc) }.also { enableDrag(it, i) })
@@ -614,7 +624,7 @@ class MainActivity : Activity() {
         contentDescription = if (scene) "$name (liga a TV e abre)" else name
         background = getDrawable(R.drawable.touch_round)
         stateListAnimator = AnimatorInflater.loadStateListAnimator(context, R.animator.press)
-        addView(logo, android.widget.FrameLayout.LayoutParams(dp(42), dp(42), android.view.Gravity.CENTER))
+        addView(logo, android.widget.FrameLayout.LayoutParams(dp(38), dp(38), android.view.Gravity.CENTER))
         if (scene) addView(View(context).apply { background = getDrawable(R.drawable.dot); background.setTint(0xFFE53935.toInt()) },
             android.widget.FrameLayout.LayoutParams(dp(10), dp(10), android.view.Gravity.TOP or android.view.Gravity.END).apply { setMargins(0, dp(2), dp(4), 0) })
         layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)

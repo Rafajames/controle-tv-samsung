@@ -189,6 +189,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         pendingLaunch = null
         val app = findApp(name)
         val appId = app?.id ?: id.ifEmpty { null }
+            ?: knownIds.entries.firstOrNull { norm(name).contains(it.key) }?.value?.first()
         if (appId == null) { status("Não achei \"$name\" na TV. Segure o atalho para escolher o app"); return }
         val type = if (app?.type == 4) "NATIVE_LAUNCH" else "DEEP_LINK"
         thread { openApp(name, appId, type) }
@@ -203,10 +204,16 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
      */
     private fun openApp(name: String, appId: String, type: String) {
         val host = ip ?: return
-        var code = rest("http://$host:8001/api/v2/applications/$appId")
-        if (code != 200 && code != 404) code = rest("https://$host:8002/api/v2/applications/$appId")
+        // O código da TV/atalho primeiro; depois os códigos conhecidos desse app (se a TV não mandou a lista)
+        val ids = (listOf(appId) + knownIds.entries.filter { norm(name).contains(it.key) }.flatMap { it.value }).distinct()
+        var code = -1
+        for (id in ids) {
+            code = rest("http://$host:8001/api/v2/applications/$id")
+            if (code != 200 && code != 404) code = rest("https://$host:8002/api/v2/applications/$id")
+            if (code == 200) { status("Abrindo $name"); if (id != appId) onResolved?.invoke(name, id); return }
+            if (code != 404) break  // a TV não respondeu ao REST: não adianta testar outros códigos
+        }
         when (code) {
-            200 -> status("Abrindo $name")
             404 -> { status("$name não está instalado nesta TV"); onLaunchFailed?.invoke(name) }
             else -> {
                 // TVs mais antigas: método pelo WebSocket
@@ -216,6 +223,21 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
             }
         }
     }
+
+    /** Avisado quando um código conhecido funcionou, para o atalho guardar esse código. */
+    @Volatile var onResolved: ((String, String) -> Unit)? = null
+
+    /** Códigos conhecidos de apps em TVs Samsung (nem todos existem em todo modelo/país). */
+    private val knownIds = mapOf(
+        "netflix" to listOf("3201907018807", "11101200001"),
+        "youtube" to listOf("111299001912"),
+        "primevideo" to listOf("3201910019365", "3201512006785", "org.tizen.ignition"),
+        "disney" to listOf("3201901017640", "MCmYXNxgcu.DisneyPlus"),
+        "browser" to listOf("org.tizen.browser", "3201907018784"),
+        "internet" to listOf("org.tizen.browser", "3201907018784"),
+        "spotify" to listOf("3201606009684"),
+        "appletv" to listOf("3201807016597"),
+    )
 
     /** POST vazio; devolve o código HTTP ou -1 se não conectou. */
     private fun rest(url: String): Int = runCatching {
