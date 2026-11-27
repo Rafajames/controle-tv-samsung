@@ -9,6 +9,7 @@ import android.os.Looper
 import android.text.InputType
 import android.animation.AnimatorInflater
 import android.os.Build
+import android.app.PendingIntent
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.widget.RadioButton
@@ -37,7 +38,10 @@ import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
 
-    private companion object { const val SPEECH_COMMAND = 1; const val SPEECH_TEXT = 2 }
+    private companion object {
+        const val SPEECH_COMMAND = 1; const val SPEECH_TEXT = 2
+        const val ACTION_INSTALLED = "com.rafajames.controletv.INSTALLED"
+    }
 
     private lateinit var tv: SamsungTv
     private lateinit var status: TextView
@@ -76,6 +80,8 @@ class MainActivity : Activity() {
         tv.onIme = { open -> runOnUiThread { tvKeyboardOpen = open; if (open && resumed) showKeyboard() else if (!open) keyboardDialog?.dismiss() } }
         renderApps()
         applyMode()
+        // Aviso automático de versão nova, no máximo uma vez por dia
+        if (System.currentTimeMillis() - prefs.getLong("lastUpdateCheck", 0) > 24 * 3600_000L) checkUpdate(silent = true)
         if (!irMode && tv.ip == null) scan()
     }
 
@@ -89,7 +95,11 @@ class MainActivity : Activity() {
     private fun press(key: String) = if (irMode) ir.send(key) else tv.key(key)
 
     private var resumed = false
-    override fun onResume() { super.onResume(); resumed = true }
+    override fun onResume() {
+        super.onResume(); resumed = true
+        // Voltou da tela de permissão: continua a atualização
+        pendingUpdate?.let { if (packageManager.canRequestPackageInstalls()) startUpdate(it) }
+    }
     override fun onPause() { super.onPause(); resumed = false }
     override fun onStart() { super.onStart(); if (!irMode) tv.connect() }
     override fun onStop() { super.onStop(); tv.disconnect() }
@@ -453,11 +463,17 @@ class MainActivity : Activity() {
     private fun toast(t: String) { status.text = t }
 
     // ---------- Atualização ----------
+    // Baixa o APK do GitHub e abre a tela "Instalar" do Android direto (sem navegador).
 
     private val myVersion: Long get() = packageManager.getPackageInfo(packageName, 0).longVersionCode
+    private var pendingUpdate: Long? = null
 
-    private fun checkUpdate() {
-        status.text = "Verificando atualização…"
+    private fun info(title: String, msg: String) =
+        AlertDialog.Builder(this).setTitle(title).setMessage(msg).setPositiveButton("OK", null).show()
+
+    /** silent = verificação automática ao abrir: só aparece se houver versão nova. */
+    private fun checkUpdate(silent: Boolean = false) {
+        if (!silent) status.text = "Verificando atualização…"
         thread {
             val latest = runCatching {
                 val c = URL("https://api.github.com/repos/Rafajames/controle-tv-samsung/releases/latest")
@@ -468,19 +484,98 @@ class MainActivity : Activity() {
                     .getString("tag_name").removePrefix("v").toLong()
             }.getOrNull()
             runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                prefs.edit().putLong("lastUpdateCheck", System.currentTimeMillis()).apply()
                 when {
-                    latest == null -> status.text = "Não consegui verificar. Confira a internet"
-                    latest <= myVersion -> status.text = "Você já tem a versão mais nova ($myVersion)"
+                    latest == null -> if (!silent) info("Atualização", "Não consegui verificar. Confira a internet e tente de novo.")
+                    latest <= myVersion -> if (!silent) info("Atualização", "Você já tem a versão mais nova ($myVersion).")
                     else -> AlertDialog.Builder(this)
                         .setTitle("Versão $latest disponível")
-                        .setMessage("Você tem a versão $myVersion. Baixar e instalar por cima?")
-                        .setPositiveButton("Baixar") { _, _ ->
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(
-                                "https://github.com/Rafajames/controle-tv-samsung/releases/download/v$latest/controle-tv.apk")))
-                        }
+                        .setMessage("Você tem a versão $myVersion. Atualizar agora?")
+                        .setPositiveButton("Atualizar") { _, _ -> startUpdate(latest) }
                         .setNegativeButton("Agora não", null).show()
                 }
+                if (!silent) status.text = if (irMode) "Infravermelho: aponte o celular para a TV" else if (tv.connected) "Conectado à TV" else ""
             }
         }
+    }
+
+    private fun startUpdate(ver: Long) {
+        if (!packageManager.canRequestPackageInstalls()) {
+            pendingUpdate = ver
+            AlertDialog.Builder(this).setTitle("Permitir atualizações")
+                .setMessage("Na próxima tela, ative \"Permitir desta fonte\" para o Controle TV e volte. Só precisa fazer isso uma vez.")
+                .setPositiveButton("Abrir") { _, _ ->
+                    startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }
+                .setNegativeButton("Cancelar") { _, _ -> pendingUpdate = null }.show()
+            return
+        }
+        pendingUpdate = null
+        val bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        val label = TextView(this).apply { text = "Baixando…"; setPadding(0, 0, 0, dp(8)) }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(16), dp(24), dp(8)); addView(label); addView(bar)
+        }
+        val progress = AlertDialog.Builder(this).setTitle("Atualizando para a versão $ver").setView(box).setCancelable(false).show()
+        thread {
+            val error = runCatching {
+                val c = URL("https://github.com/Rafajames/controle-tv-samsung/releases/download/v$ver/controle-tv.apk")
+                    .openConnection() as HttpURLConnection
+                c.connectTimeout = 10000; c.readTimeout = 20000
+                val total = c.contentLengthLong
+                val installer = packageManager.packageInstaller
+                val params = android.content.pm.PackageInstaller.SessionParams(
+                    android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+                val id = installer.createSession(params)
+                installer.openSession(id).use { session ->
+                    c.inputStream.use { input ->
+                        session.openWrite("controle-tv.apk", 0, if (total > 0) total else -1).use { out ->
+                            val buf = ByteArray(64 * 1024); var done = 0L; var last = -1
+                            while (true) {
+                                val n = input.read(buf); if (n < 0) break
+                                out.write(buf, 0, n); done += n
+                                val pct = if (total > 0) (done * 100 / total).toInt() else 0
+                                if (pct != last) { last = pct; runOnUiThread { bar.progress = pct; label.text = "Baixando… $pct%" } }
+                            }
+                            session.fsync(out)
+                        }
+                    }
+                    val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+                    val pi = PendingIntent.getActivity(this, 7,
+                        Intent(this, MainActivity::class.java).setAction(ACTION_INSTALLED), flags)
+                    session.commit(pi.intentSender)
+                }
+            }.exceptionOrNull()
+            runOnUiThread {
+                progress.dismiss()
+                if (error != null) updateFailed(ver, error.message ?: "erro ao baixar")
+            }
+        }
+    }
+
+    /** Resposta do instalador do Android (chega aqui pelo launchMode singleTop). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action != ACTION_INSTALLED) return
+        when (intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999)) {
+            android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                @Suppress("DEPRECATION")
+                (intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT))?.let { startActivity(it) }
+            }
+            android.content.pm.PackageInstaller.STATUS_SUCCESS -> Unit
+            android.content.pm.PackageInstaller.STATUS_FAILURE_ABORTED -> status.text = "Atualização cancelada"
+            else -> updateFailed(null, intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "o Android recusou a instalação")
+        }
+    }
+
+    /** Se o instalador interno falhar (alguns celulares bloqueiam), oferece o navegador. */
+    private fun updateFailed(ver: Long?, why: String) {
+        val url = if (ver != null) "https://github.com/Rafajames/controle-tv-samsung/releases/download/v$ver/controle-tv.apk"
+            else "https://github.com/Rafajames/controle-tv-samsung/releases/latest/download/controle-tv.apk"
+        AlertDialog.Builder(this).setTitle("Não deu para atualizar")
+            .setMessage("Motivo: $why\n\nQuer baixar pelo navegador?")
+            .setPositiveButton("Abrir navegador") { _, _ -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .setNegativeButton("Fechar", null).show()
     }
 }
