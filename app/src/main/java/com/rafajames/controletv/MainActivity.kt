@@ -280,6 +280,13 @@ class MainActivity : Activity() {
         val chosen = { vibrate.checkedRadioButtonId - 100 }
         val test = Button(this).apply { text = "Testar vibração"; isAllCaps = false; setOnClickListener { buzz(level = chosen()) } }
         val update = Button(this).apply { text = "Verificar atualização (versão $myVersion)"; isAllCaps = false }
+        // Diagnóstico: quantos apps a TV informou (sem lista, os atalhos usam códigos fixos)
+        val n = tv.installed.size
+        val tvApps = Button(this).apply {
+            isAllCaps = false
+            text = if (n > 0) "Ver apps da TV ($n)" else "Apps da TV: nenhum ainda (conecte com a TV ligada)"
+            isEnabled = n > 0
+        }
         val volKeys = CheckBox(this).apply { text = "Botões de volume do celular controlam a TV"; isChecked = prefs.getBoolean("volKeys", true) }
         val notif = CheckBox(this).apply { text = "Volume e pausa na notificação (fora do app)"; isChecked = prefs.getBoolean("notif", true) }
         val box = LinearLayout(this).apply {
@@ -287,7 +294,7 @@ class MainActivity : Activity() {
             addView(input)
             addView(TextView(context).apply { text = "Vibração ao tocar"; setPadding(0, dp(12), 0, 0) })
             addView(vibrate); addView(test)
-            addView(volKeys); addView(notif); addView(update)
+            addView(volKeys); addView(notif); addView(tvApps); addView(update)
         }
         val dialog = AlertDialog.Builder(this)
             .setTitle("Configurações")
@@ -307,6 +314,13 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancelar", null)
             .show()
         update.setOnClickListener { dialog.dismiss(); checkUpdate() }
+        tvApps.setOnClickListener {
+            dialog.dismiss()
+            val apps = tv.installed
+            AlertDialog.Builder(this).setTitle("Apps da TV (toque para abrir)")
+                .setAdapter(appAdapter(apps.map { it.name to it.id })) { _, w -> tv.launch(apps[w].name, apps[w].id) }
+                .setNegativeButton("Fechar", null).show()
+        }
     }
 
     /** Conexão: escolher IR ou Wi-Fi, reconectar ou procurar a TV. */
