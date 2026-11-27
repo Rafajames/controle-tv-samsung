@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+    <LinearLayout android:id="@+id/root" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+        <LinearLayout style="@style/Row" android:gravity="center_vertical">
+            <TextView android:id="@+id/status" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:textColor="#B0BEC5" android:textSize="14sp"
+                android:padding="6dp" android:text="Iniciando…" />
+            <Button android:id="@+id/settings" android:layout_width="56dp" android:layout_height="56dp"
+                android:background="@drawable/btn" android:text="⚙" android:textColor="#FFFFFF" android:textSize="22sp" />
+        </LinearLayout>
+        <Space android:layout_width="1dp" android:layout_height="8dp" />
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:id="@+id/power" android:text="⏻" android:textSize="24sp" android:background="@drawable/btn_power" />
+            <Button style="@style/Btn" android:tag="KEY_SOURCE" android:text="Fonte" />
+            <Button style="@style/Btn" android:tag="KEY_MENU" android:text="Menu" />
+        </LinearLayout>
+        <Space android:layout_width="1dp" android:layout_height="12dp" />
+        <LinearLayout style="@style/Row">
+            <Space style="@style/Gap" />
+            <Button style="@style/Btn" android:tag="KEY_UP" android:text="▲" android:layout_height="84dp" android:textSize="26sp" />
+            <Space style="@style/Gap" />
+        </LinearLayout>
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:tag="KEY_LEFT" android:text="◀" android:layout_height="84dp" android:textSize="26sp" />
+            <Button style="@style/Btn" android:tag="KEY_ENTER" android:text="OK" android:layout_height="84dp" android:background="@drawable/btn_ok" android:textStyle="bold" />
+            <Button style="@style/Btn" android:tag="KEY_RIGHT" android:text="▶" android:layout_height="84dp" android:textSize="26sp" />
+        </LinearLayout>
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:tag="KEY_RETURN" android:text="↩ Voltar" />
+            <Button style="@style/Btn" android:tag="KEY_DOWN" android:text="▼" android:layout_height="84dp" android:textSize="26sp" />
+            <Button style="@style/Btn" android:tag="KEY_HOME" android:text="⌂ Home" />
+        </LinearLayout>
+        <Space android:layout_width="1dp" android:layout_height="12dp" />
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:tag="KEY_VOLUP" android:text="VOL +" />
+            <Button style="@style/Btn" android:tag="KEY_MUTE" android:text="🔇" />
+            <Button style="@style/Btn" android:tag="KEY_CHUP" android:text="CH +" />
+        </LinearLayout>
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:tag="KEY_VOLDOWN" android:text="VOL −" />
+            <Space style="@style/Gap" />
+            <Button style="@style/Btn" android:tag="KEY_CHDOWN" android:text="CH −" />
+        </LinearLayout>
+        <Space android:layout_width="1dp" android:layout_height="12dp" />
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:tag="KEY_1" android:text="1" />
+            <Button style="@style/Btn" android:tag="KEY_2" android:text="2" />
+            <Button style="@style/Btn" android:tag="KEY_3" android:text="3" />
+        </LinearLayout>
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:tag="KEY_4" android:text="4" />
+            <Button style="@style/Btn" android:tag="KEY_5" android:text="5" />
+            <Button style="@style/Btn" android:tag="KEY_6" android:text="6" />
+        </LinearLayout>
+        <LinearLayout style="@style/Row">
+            <Button style="@style/Btn" android:tag="KEY_7" android:text="7" />
+            <Button style="@style/Btn" android:tag="KEY_8" android:text="8" />
+            <Button style="@style/Btn" android:tag="KEY_9" android:text="9" />
+        </LinearLayout>
+        <LinearLayout style="@style/Row">
+            <Space style="@style/Gap" />
+            <Button style="@style/Btn" android:tag="KEY_0" android:text="0" />
+            <Space style="@style/Gap" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,16 @@
+# Controle TV Samsung
+
+Controle remoto Android para TVs Samsung Tizen (2016+), via Wi‑Fi. Não precisa de infravermelho nem do SmartThings.
+
+**Baixar:** https://github.com/Rafajames/controle-tv-samsung/releases/latest/download/controle-tv.apk
+
+## Primeiro uso
+1. O celular e a TV precisam estar no mesmo Wi‑Fi.
+2. Abra o app: ele procura a TV sozinho (ou toque em ⚙ e digite o IP).
+3. Na TV, aceite o aviso **Permitir** (só na primeira vez).
+
+## Ligar a TV pelo app (Wake‑on‑LAN)
+- Na TV: Configurações → Geral e Privacidade → Rede → Configurações avançadas → **Ligar com dispositivo móvel** = Ativado.
+- Conecte o app pelo menos uma vez com a TV ligada, para ele aprender o endereço MAC dela.
+
+Cada push no `main` gera um APK novo em *Releases*.
