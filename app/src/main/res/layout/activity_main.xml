@@ -1,43 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Layout por zonas, numa grade de 3 colunas (esquerda | centro 72dp | direita):
-  1. Conexão  2. Apps  3. Navegação  4. Voltar/Voz/Home  5. Mídia  6. Volume/Canal
-  Formas: círculo para ícone único no centro; cantos de 18dp para o resto. Espaço entre botões: 8dp.
+  Visual "cristal" (temas em Theme.kt; cores aplicadas em MainActivity.applyTheme):
+  1. Ligar + Wi-Fi/IR  2. TV conectada + Apps da TV + Configurações  3. Painel VOL | mudo/123 | touchpad/teclado | CH
+  4. Direcional (Fonte e Voz nos cantos)  5. Voltar | Home | Play/Pausa  6. Seus apps
 -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/screen"
     android:layout_width="match_parent" android:layout_height="match_parent">
 <LinearLayout android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:paddingStart="12dp" android:paddingEnd="12dp"
-    android:paddingTop="10dp" android:paddingBottom="12dp">
+    android:orientation="vertical" android:paddingStart="18dp" android:paddingEnd="18dp"
+    android:paddingTop="12dp" android:paddingBottom="12dp">
 
-    <!-- 1. Conexão: status (tocar = IR/Wi-Fi), configurações e liga/desliga -->
-    <LinearLayout style="@style/Row" android:gravity="center_vertical">
-        <LinearLayout android:id="@+id/statusPill" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="52dp" android:layout_margin="4dp" android:orientation="horizontal"
-            android:gravity="center_vertical" android:paddingStart="16dp" android:paddingEnd="12dp"
-            android:background="@drawable/btn" android:stateListAnimator="@animator/press"
-            android:contentDescription="Conexão. Toque para escolher IR ou Wi-Fi">
-            <View android:id="@+id/statusDot" android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/dot" />
-            <TextView android:id="@+id/statusLabel" android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content" android:layout_marginStart="10dp" android:textColor="#E8ECF2"
-                android:textSize="15sp" android:singleLine="true" android:ellipsize="end" android:text="Iniciando…" />
-            <ImageView android:id="@+id/statusMode" android:layout_width="20dp" android:layout_height="20dp"
-                android:src="@drawable/ic_wifi" android:alpha="0.7" android:importantForAccessibility="no" />
+    <!-- 1. Ligar + modo -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center">
+        <ImageButton android:id="@+id/power" style="@style/Glass" android:src="@drawable/ic_power"
+            android:contentDescription="Ligar ou desligar" />
+        <LinearLayout android:id="@+id/modeSeg" android:layout_width="wrap_content" android:layout_height="46dp"
+            android:layout_marginStart="12dp" android:orientation="horizontal" android:padding="4dp">
+            <TextView android:id="@+id/modeWifi" style="@style/Seg" android:text="Wi‑Fi" />
+            <TextView android:id="@+id/modeIr" style="@style/Seg" android:text="IR" />
         </LinearLayout>
-        <ImageButton android:id="@+id/settings" style="@style/RoundKey" android:layout_width="52dp" android:layout_height="52dp"
-            android:src="@drawable/ic_settings" android:contentDescription="Configurações" />
-        <ImageButton android:id="@+id/power" style="@style/RoundKey" android:layout_width="52dp" android:layout_height="52dp"
-            android:background="@drawable/btn_power" android:src="@drawable/ic_power" android:contentDescription="Ligar ou desligar" />
     </LinearLayout>
 
-    <!-- 2. Apps: só a logo, numa linha -->
-    <LinearLayout android:id="@+id/apps" style="@style/Row" android:layout_marginTop="6dp" />
+    <!-- 2. TV + ações -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="10dp" android:orientation="horizontal" android:gravity="center_vertical">
+        <LinearLayout android:id="@+id/statusPill" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="48dp" android:orientation="horizontal" android:gravity="center_vertical"
+            android:paddingStart="16dp" android:paddingEnd="14dp"
+            android:contentDescription="Conexão. Toque para reconectar ou procurar a TV">
+            <View android:id="@+id/statusDot" android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/dot" />
+            <TextView android:id="@+id/statusLabel" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_marginStart="10dp" android:textSize="15sp"
+                android:textStyle="bold" android:singleLine="true" android:ellipsize="end" android:text="Iniciando…" />
+            <ImageView android:id="@+id/statusMode" android:layout_width="18dp" android:layout_height="18dp"
+                android:src="@drawable/ic_chevron_down" android:importantForAccessibility="no" />
+        </LinearLayout>
+        <ImageButton android:id="@+id/search" style="@style/Glass" android:layout_marginStart="8dp"
+            android:src="@drawable/ic_search" android:contentDescription="Apps da TV" />
+        <ImageButton android:id="@+id/settings" style="@style/Glass" android:layout_marginStart="8dp"
+            android:src="@drawable/ic_more_vert" android:contentDescription="Configurações" />
+    </LinearLayout>
 
-    <!-- 3. Navegação: direcional ou touchpad (ocupa o espaço que sobrar) -->
+    <!-- 3. Painel de volume e canal -->
+    <LinearLayout android:id="@+id/ctrlPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:orientation="horizontal" android:gravity="center_vertical"
+        android:padding="12dp">
+        <LinearLayout android:id="@+id/volPill" style="@style/Pill">
+            <ImageButton style="@style/PillBtn" android:tag="KEY_VOLUP" android:src="@drawable/ic_add" android:contentDescription="Aumentar volume" />
+            <TextView style="@style/PillLabel" android:text="VOL" />
+            <ImageButton style="@style/PillBtn" android:tag="KEY_VOLDOWN" android:src="@drawable/ic_remove" android:contentDescription="Diminuir volume" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="center_horizontal">
+            <ImageButton android:id="@+id/mute" style="@style/GlassSmall" android:tag="KEY_MUTE" android:src="@drawable/ic_mute" android:contentDescription="Mudo" />
+            <Button android:id="@+id/more" style="@style/GlassSmallText" android:layout_marginTop="12dp" android:text="123"
+                android:contentDescription="Números e mais controles" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="center_horizontal">
+            <ImageButton android:id="@+id/padToggle" style="@style/GlassSmall" android:src="@drawable/ic_touch" android:contentDescription="Touchpad ou direcional" />
+            <ImageButton android:id="@+id/keyboard" style="@style/GlassSmall" android:layout_marginTop="12dp"
+                android:src="@drawable/ic_keyboard" android:contentDescription="Escrever na TV" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/chPill" style="@style/Pill">
+            <ImageButton style="@style/PillBtn" android:tag="KEY_CHUP" android:src="@drawable/ic_ch_up" android:contentDescription="Próximo canal" />
+            <TextView style="@style/PillLabel" android:text="CH" />
+            <ImageButton style="@style/PillBtn" android:tag="KEY_CHDOWN" android:src="@drawable/ic_ch_down" android:contentDescription="Canal anterior" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 4. Navegação: direcional ou touchpad (ocupa o espaço que sobrar) -->
     <FrameLayout android:id="@+id/dpadBox" android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="1" android:clipChildren="false">
-        <FrameLayout android:id="@+id/dpad" android:layout_width="264dp" android:layout_height="264dp" android:layout_gravity="center"
-            android:padding="4dp" android:background="@drawable/dpad_ring" android:elevation="6dp">
+        android:layout_weight="1" android:layout_marginTop="8dp" android:clipChildren="false">
+        <FrameLayout android:id="@+id/dpad" android:layout_width="264dp" android:layout_height="264dp" android:layout_gravity="center">
             <ImageButton style="@style/DpadBtn" android:layout_gravity="top|center_horizontal" android:tag="KEY_UP"
                 android:src="@drawable/ic_up" android:contentDescription="Cima" />
             <ImageButton style="@style/DpadBtn" android:layout_gravity="bottom|center_horizontal" android:tag="KEY_DOWN"
@@ -46,47 +82,42 @@
                 android:src="@drawable/ic_left" android:contentDescription="Esquerda" />
             <ImageButton style="@style/DpadBtn" android:layout_gravity="end|center_vertical" android:tag="KEY_RIGHT"
                 android:src="@drawable/ic_right" android:contentDescription="Direita" />
-            <Button android:layout_width="104dp" android:layout_height="104dp" android:layout_gravity="center"
-                android:tag="KEY_ENTER" android:text="OK" android:textColor="#FFFFFF" android:textSize="20sp"
-                android:textStyle="bold" android:background="@drawable/btn_ok" android:elevation="4dp"
+            <Button android:id="@+id/ok" android:layout_width="110dp" android:layout_height="110dp" android:layout_gravity="center"
+                android:tag="KEY_ENTER" android:text="OK" android:textSize="19sp" android:textStyle="bold"
                 android:stateListAnimator="@animator/press" />
         </FrameLayout>
         <com.rafajames.controletv.TouchPad android:id="@+id/touchpad" android:layout_width="264dp" android:layout_height="264dp"
             android:layout_gravity="center" android:visibility="gone" android:contentDescription="Touchpad" />
+        <ImageButton android:id="@+id/source" style="@style/Glass" android:layout_gravity="top|start" android:tag="KEY_SOURCE"
+            android:src="@drawable/ic_input" android:contentDescription="Fonte de entrada" />
+        <ImageButton android:id="@+id/voice" style="@style/Glass" android:layout_gravity="top|end"
+            android:src="@drawable/ic_mic" android:contentDescription="Voz. Segure para o assistente da TV" />
     </FrameLayout>
 
-    <!-- 4. Voltar | Voz | Home -->
-    <LinearLayout style="@style/Row" android:gravity="center_vertical">
-        <Button style="@style/Key" android:tag="KEY_RETURN" android:drawableStart="@drawable/ic_back" android:text="Voltar" />
-        <ImageButton style="@style/RoundKey" android:id="@+id/voice" android:src="@drawable/ic_mic"
-            android:contentDescription="Voz. Segure para o assistente da TV" />
-        <Button style="@style/Key" android:tag="KEY_HOME" android:drawableStart="@drawable/ic_home" android:text="Home" />
+    <!-- 5. Voltar | Home | Play/Pausa -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingStart="8dp" android:paddingEnd="8dp">
+        <ImageButton android:id="@+id/back" style="@style/GlassBig" android:tag="KEY_RETURN" android:src="@drawable/ic_back" android:contentDescription="Voltar" />
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <ImageButton android:id="@+id/home" style="@style/GlassBig" android:tag="KEY_HOME" android:src="@drawable/ic_home" android:contentDescription="Home" />
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <ImageButton android:id="@+id/playPause" style="@style/GlassBig" android:src="@drawable/ic_playpause" android:contentDescription="Pausar ou continuar" />
     </LinearLayout>
 
-    <!-- 5. Mídia: retroceder | play/pausa | avançar -->
-    <LinearLayout style="@style/Row" android:gravity="center_vertical">
-        <ImageButton style="@style/IconKey" android:tag="KEY_REWIND" android:src="@drawable/ic_rewind" android:contentDescription="Retroceder" />
-        <ImageButton style="@style/RoundKey" android:id="@+id/playPause" android:src="@drawable/ic_playpause" android:contentDescription="Pausar ou continuar" />
-        <ImageButton style="@style/IconKey" android:tag="KEY_FF" android:src="@drawable/ic_forward" android:contentDescription="Avançar" />
-    </LinearLayout>
-
-    <!-- 6. Volume | mudo + Mais | Canal -->
-    <LinearLayout style="@style/Row" android:gravity="center_vertical">
-        <LinearLayout style="@style/Pill">
-            <ImageButton style="@style/PillBtn" android:tag="KEY_VOLUP" android:src="@drawable/ic_add" android:contentDescription="Aumentar volume" />
-            <TextView style="@style/PillLabel" android:text="VOL" />
-            <ImageButton style="@style/PillBtn" android:tag="KEY_VOLDOWN" android:src="@drawable/ic_remove" android:contentDescription="Diminuir volume" />
+    <!-- 6. Seus apps -->
+    <LinearLayout android:id="@+id/appsPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:orientation="vertical"
+        android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="10dp" android:paddingBottom="8dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+            android:paddingStart="4dp" android:paddingEnd="4dp">
+            <TextView android:id="@+id/appsTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:text="SEUS APPS" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.06" />
+            <TextView android:id="@+id/appsEdit" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Editar" android:textSize="13sp" android:textStyle="bold" android:minHeight="24dp" />
         </LinearLayout>
-        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical">
-            <ImageButton style="@style/RoundKey" android:tag="KEY_MUTE" android:src="@drawable/ic_mute" android:contentDescription="Mudo" />
-            <Button style="@style/RoundKeyText" android:id="@+id/more" android:text="Mais" android:textSize="13sp" android:paddingTop="0dp" android:gravity="center"
-                android:contentDescription="Mais controles: Fonte, Menu, Enter, teclado, números e touchpad" />
-        </LinearLayout>
-        <LinearLayout style="@style/Pill">
-            <ImageButton style="@style/PillBtn" android:tag="KEY_CHUP" android:src="@drawable/ic_ch_up" android:contentDescription="Próximo canal" />
-            <TextView style="@style/PillLabel" android:text="CH" />
-            <ImageButton style="@style/PillBtn" android:tag="KEY_CHDOWN" android:src="@drawable/ic_ch_down" android:contentDescription="Canal anterior" />
-        </LinearLayout>
+        <LinearLayout android:id="@+id/apps" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:orientation="horizontal" />
     </LinearLayout>
 </LinearLayout>
 

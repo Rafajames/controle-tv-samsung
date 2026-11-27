@@ -83,6 +83,17 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.settings).setOnClickListener { showSettings() }
         findViewById<View>(R.id.power).setOnClickListener { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
         findViewById<View>(R.id.more).setOnClickListener { buzz(); showMore() }
+        findViewById<View>(R.id.search).setOnClickListener { buzz(); showTvApps() }
+        findViewById<View>(R.id.keyboard).setOnClickListener { buzz(); showKeyboard() }
+        findViewById<View>(R.id.padToggle).setOnClickListener { buzz(); showTouchPad(findViewById<View>(R.id.touchpad).visibility != View.VISIBLE) }
+        findViewById<View>(R.id.appsEdit).setOnClickListener { buzz(); showAllApps() }
+        findViewById<View>(R.id.modeWifi).setOnClickListener { buzz(); if (irMode) { irMode = false; applyMode() } }
+        findViewById<View>(R.id.modeIr).setOnClickListener {
+            buzz()
+            if (!ir.available) status.text = "Este celular não tem infravermelho"
+            else if (!irMode) { irMode = true; applyMode() }
+        }
+        applyTheme()
         fitDpad()
         findViewById<View>(R.id.playPause).setOnClickListener {
             buzz()
@@ -109,9 +120,185 @@ class MainActivity : Activity() {
     }
 
     private fun applyMode() {
-        findViewById<android.widget.ImageView>(R.id.statusMode).setImageResource(if (irMode) R.drawable.ic_ir else R.drawable.ic_wifi)
+        paintSegment()
         if (irMode) tv.disconnect() else tv.connect()
         refreshPill(null)
+    }
+
+    // ---------- Tema (visual cristal) ----------
+
+    private var pal: Palette = Themes.branco
+    private val accent get() = pal.accents[prefs.getInt("accent", 0).coerceIn(0, 3)]
+    private fun csl(c: Int) = android.content.res.ColorStateList.valueOf(c)
+
+    private fun currentPalette(): Palette {
+        if (prefs.getBoolean("themeAuto", false)) {
+            val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+            return if (night) Themes.cristal else Themes.branco
+        }
+        return Themes.byName(prefs.getString("theme", null))
+    }
+
+    /** Pinta a tela inteira com o tema escolhido (Configurações › Aparência). */
+    private fun applyTheme() {
+        pal = currentPalette()
+        val p = pal; val d1 = dp(1); val acc = accent
+        val lift = { v: View, z: Int -> v.elevation = if (p.raised) dp(z).toFloat() else 0f }
+        findViewById<View>(R.id.screen).background = CrystalBackground(p)
+        window.statusBarColor = p.base; window.navigationBarColor = p.base
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = if (p.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        listOf(R.id.ctrlPanel to 26, R.id.appsPanel to 24, R.id.modeSeg to 23).forEach { (id, r) ->
+            findViewById<View>(id).background = Themes.glass(p.panel, p.edge, dp(r).toFloat(), d1)
+        }
+        findViewById<View>(R.id.statusPill).background = Themes.pressable(p, p.panel, dp(24).toFloat(), d1)
+        listOf(R.id.volPill, R.id.chPill).forEach { findViewById<View>(it).apply { background = Themes.glass(p.btn, p.edge, dp(32).toFloat(), d1); lift(this, 3) } }
+        listOf(R.id.power, R.id.search, R.id.settings, R.id.mute, R.id.more, R.id.padToggle, R.id.keyboard,
+            R.id.source, R.id.voice, R.id.back, R.id.home, R.id.playPause).forEach {
+            findViewById<View>(it).apply { background = Themes.pressable(p, p.btn, -1f, d1); lift(this, 3) }
+        }
+        findViewById<View>(R.id.dpad).apply { background = Themes.glass(p.ring, p.edge, -1f, d1); lift(this, 6) }
+        findViewById<Button>(R.id.ok).apply { background = Themes.pressable(p, p.ok, -1f, d1); setTextColor(p.text); lift(this, 4) }
+        tintTree(findViewById(R.id.root), p)
+        findViewById<ImageButton>(R.id.power).imageTintList = csl(0xFFFF4D4D.toInt())
+        findViewById<ImageButton>(R.id.home).imageTintList = csl(acc)
+        findViewById<TextView>(R.id.statusLabel).setTextColor(p.text)
+        findViewById<android.widget.ImageView>(R.id.statusMode).imageTintList = csl(p.muted)
+        findViewById<TextView>(R.id.appsTitle).setTextColor(p.muted)
+        findViewById<TextView>(R.id.appsEdit).setTextColor(acc)
+        findViewById<Button>(R.id.more).setTextColor(p.text)
+        paintSegment()
+        renderApps()
+    }
+
+    private fun tintTree(v: View, p: Palette) {
+        if (v.id == R.id.apps) return
+        when (v) {
+            is ViewGroup -> for (i in 0 until v.childCount) tintTree(v.getChildAt(i), p)
+            is ImageButton -> v.imageTintList = csl(if ((v.parent as? View)?.id == R.id.dpad) p.arrow else p.text)
+            is Button -> {}
+            is TextView -> if (v.text == "VOL" || v.text == "CH") v.setTextColor(p.muted)
+        }
+    }
+
+    /** Seletor Wi-Fi | IR do topo. */
+    private fun paintSegment() {
+        val acc = accent
+        listOf(R.id.modeWifi to !irMode, R.id.modeIr to irMode).forEach { (id, on) ->
+            findViewById<TextView>(id).apply {
+                background = if (on) Themes.solid((acc and 0x00FFFFFF) or 0x2E000000, dp(19).toFloat()) else null
+                setTextColor(if (on) acc else pal.muted)
+            }
+        }
+    }
+
+    /** Configurações › Aparência: tema, seguir o celular e cor de destaque (muda na hora). */
+    private fun showAppearance() {
+        val themes = RadioGroup(this).apply {
+            Themes.all.forEachIndexed { i, t ->
+                addView(RadioButton(context).apply { id = 300 + i; textSize = 15f; text = t.name + if (t.dark) " · escuro" else " · claro" })
+            }
+            check(300 + Themes.all.indexOfFirst { it.name == pal.name }.coerceAtLeast(0))
+        }
+        val auto = CheckBox(this).apply { text = "Seguir o tema do celular (branco de dia, Cristal à noite)"; isChecked = prefs.getBoolean("themeAuto", false) }
+        val accents = RadioGroup(this).apply {
+            Themes.accentNames.forEachIndexed { i, n -> addView(RadioButton(context).apply { id = 400 + i; text = n; textSize = 15f }) }
+            check(400 + prefs.getInt("accent", 0).coerceIn(0, 3))
+        }
+        themes.setOnCheckedChangeListener { _, id ->
+            prefs.edit().putString("theme", Themes.all[id - 300].name).putBoolean("themeAuto", false).apply()
+            auto.isChecked = false; applyTheme()
+        }
+        auto.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("themeAuto", on).apply(); applyTheme() }
+        accents.setOnCheckedChangeListener { _, id -> prefs.edit().putInt("accent", id - 400).apply(); applyTheme() }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
+            addView(TextView(context).apply { text = "Tema"; textSize = 13f })
+            addView(themes); addView(auto)
+            addView(TextView(context).apply { text = "Cor de destaque"; textSize = 13f; setPadding(0, dp(14), 0, 0) })
+            addView(accents)
+        }
+        AlertDialog.Builder(this).setTitle("Aparência")
+            .setView(android.widget.ScrollView(this).apply { addView(box) })
+            .setPositiveButton("Pronto", null).show()
+    }
+
+    /** Apps da TV: grade com busca; tocar abre, segurar fixa no controle. */
+    private fun showTvApps() {
+        val p = pal
+        val grid = android.widget.GridLayout(this).apply { columnCount = 4 }
+        val info = TextView(this).apply { textSize = 12f; setTextColor(p.muted) }
+        val search = EditText(this).apply {
+            hint = "Procurar app"; isSingleLine = true; textSize = 15f; setTextColor(p.text); setHintTextColor(p.muted)
+            background = Themes.glass(p.btn, p.edge, dp(14).toFloat(), dp(1)); setPadding(dp(14), dp(10), dp(14), dp(10))
+        }
+        val refresh = Button(this).apply {
+            text = "Atualizar"; isAllCaps = false; setTextColor(p.text); minHeight = dp(40); minimumHeight = dp(40)
+            background = Themes.pressable(p, p.btn, dp(20).toFloat(), dp(1)); setPadding(dp(16), 0, dp(16), 0)
+        }
+        lateinit var dialog: AlertDialog
+        val cell = (resources.displayMetrics.widthPixels - dp(40)) / 4
+        fun fill() {
+            val q = norm(search.text.toString())
+            info.text = if (tv.installed.isEmpty()) "Nenhum app ainda. Com a TV ligada, toque em Atualizar."
+                else "${tv.installed.size} encontrados · via ${tv.appsSource} · segure para fixar"
+            grid.removeAllViews()
+            tv.installed.filter { q.isEmpty() || norm(it.name).contains(q) }.forEach { a ->
+                val tile = appTile(a.name, logoView(a.name, a.id), false) { dialog.dismiss(); tv.launch(a.name, a.id) }
+                tile.setOnLongClickListener {
+                    buzz(Buzz.HEAVY)
+                    val list = loadApps()
+                    if (list.none { norm(it.name) == norm(a.name) }) {
+                        list.add(minOf(4, list.size), Shortcut(a.name, a.id)); saveApps(list); status.text = "${a.name} fixado no controle"
+                    } else status.text = "${a.name} já está no controle"
+                    true
+                }
+                grid.addView(tile, android.widget.GridLayout.LayoutParams().apply { width = cell; height = dp(86) })
+            }
+        }
+        val again = Runnable { if (dialog.isShowing) fill() }
+        fun refreshNow() {
+            info.text = "Procurando apps na TV…"; tv.refreshApps()
+            listOf(4000L, 9000L, 16000L).forEach { handler.postDelayed(again, it) }
+        }
+        refresh.setOnClickListener { buzz(); refreshNow() }
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(e: android.text.Editable?) = fill()
+            override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+        val head = LinearLayout(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(context).apply { text = "Apps da TV"; textSize = 20f; setTextColor(p.text); typeface = android.graphics.Typeface.DEFAULT_BOLD })
+                addView(info)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(refresh)
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(20))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(p.sheet); val r = dp(28).toFloat(); cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            }
+            addView(View(context).apply { background = Themes.solid(p.muted and 0x00FFFFFF or 0x66000000, dp(2).toFloat()) },
+                LinearLayout.LayoutParams(dp(40), dp(4)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12) })
+            addView(head)
+            addView(search, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14); bottomMargin = dp(10) })
+            addView(android.widget.ScrollView(context).apply { addView(grid) },
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.5).toInt()))
+        }
+        dialog = AlertDialog.Builder(this).setView(box).create()
+        dialog.setOnDismissListener { handler.removeCallbacks(again) }
+        dialog.window?.apply {
+            setGravity(android.view.Gravity.BOTTOM)
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
+        fill()
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        if (tv.installed.isEmpty() && !irMode) refreshNow()
     }
 
     // ---------- Status (bolinha colorida) ----------
@@ -222,6 +409,7 @@ class MainActivity : Activity() {
     private fun showTouchPad(on: Boolean) {
         findViewById<View>(R.id.touchpad).visibility = if (on) View.VISIBLE else View.GONE
         findViewById<View>(R.id.dpad).visibility = if (on) View.GONE else View.VISIBLE
+        findViewById<android.widget.ImageButton>(R.id.padToggle).setImageResource(if (on) R.drawable.ic_dpad else R.drawable.ic_touch)
         prefs.edit().putBoolean("touchpad", on).apply()
     }
 
@@ -294,6 +482,7 @@ class MainActivity : Activity() {
             text = if (n > 0) "Ver apps da TV ($n · via ${tv.appsSource})"
                 else "Apps da TV: nenhum ainda (toque para procurar)" + (tv.lastError?.let { "\nErro da TV: $it" } ?: "")
         }
+        val look = Button(this).apply { isAllCaps = false; text = "Aparência: ${pal.name}" }
         val volKeys = CheckBox(this).apply { text = "Botões de volume do celular controlam a TV"; isChecked = prefs.getBoolean("volKeys", true) }
         val notif = CheckBox(this).apply { text = "Volume e pausa na notificação (fora do app)"; isChecked = prefs.getBoolean("notif", true) }
         val box = LinearLayout(this).apply {
@@ -301,7 +490,7 @@ class MainActivity : Activity() {
             addView(input)
             addView(TextView(context).apply { text = "Vibração ao tocar"; setPadding(0, dp(12), 0, 0) })
             addView(vibrate); addView(test)
-            addView(volKeys); addView(notif); addView(tvApps); addView(update)
+            addView(look); addView(volKeys); addView(notif); addView(tvApps); addView(update)
         }
         val dialog = AlertDialog.Builder(this)
             .setTitle("Configurações")
@@ -321,15 +510,8 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancelar", null)
             .show()
         update.setOnClickListener { dialog.dismiss(); checkUpdate() }
-        tvApps.setOnClickListener {
-            dialog.dismiss()
-            val apps = tv.installed
-            if (apps.isEmpty()) { status.text = "Procurando apps na TV…"; tv.refreshApps(); return@setOnClickListener }
-            AlertDialog.Builder(this).setTitle("Apps da TV · via ${tv.appsSource}")
-                .setAdapter(appAdapter(apps.map { it.name to it.id })) { _, w -> tv.launch(apps[w].name, apps[w].id) }
-                .setNeutralButton("Atualizar") { _, _ -> status.text = "Atualizando apps da TV…"; tv.refreshApps() }
-                .setNegativeButton("Fechar", null).show()
-        }
+        look.setOnClickListener { dialog.dismiss(); showAppearance() }
+        tvApps.setOnClickListener { dialog.dismiss(); showTvApps() }
     }
 
     /** Conexão: escolher IR ou Wi-Fi, reconectar ou procurar a TV. */
@@ -361,10 +543,6 @@ class MainActivity : Activity() {
             text = if (onPad) "Direcional" else "Touchpad"
             setCompoundDrawablesRelativeWithIntrinsicBounds(0, if (onPad) R.drawable.ic_dpad else R.drawable.ic_touch, 0, 0)
             setOnClickListener { buzz(); showTouchPad(!onPad); dialog.dismiss() }
-        }
-        sheet.findViewById<View>(R.id.mKeyboard).setOnClickListener {
-            buzz(); dialog.dismiss()
-            if (irMode) status.text = "O teclado só funciona no Wi-Fi: toque no status do topo" else showKeyboard()
         }
         sheet.findViewById<View>(R.id.mApps).setOnClickListener { buzz(); dialog.dismiss(); showAllApps() }
         dialog.window?.apply {
@@ -581,7 +759,7 @@ class MainActivity : Activity() {
         return if (f.exists()) android.graphics.BitmapFactory.decodeFile(f.path) else null
     }
 
-    private fun rounded(color: Int) = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(9).toFloat(); setColor(color) }
+    private fun rounded(color: Int) = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(color) }
 
     private fun logoView(name: String, id: String): View {
         iconFor(name, id)?.let { bmp ->
@@ -599,7 +777,7 @@ class MainActivity : Activity() {
     private fun monogram(text: String, color: Int) = TextView(this).apply {
         this.text = text; gravity = android.view.Gravity.CENTER; setTextColor(Color.WHITE)
         typeface = android.graphics.Typeface.DEFAULT_BOLD
-        textSize = when { text.length >= 4 -> 9f; text.length == 3 -> 10.5f; else -> 15f }
+        textSize = when { text.length >= 4 -> 12f; text.length == 3 -> 14f; else -> 21f }
         background = rounded(color)
     }
 
@@ -611,26 +789,41 @@ class MainActivity : Activity() {
     private fun renderApps() {
         appsRow.removeAllViews()
         val apps = loadApps()
-        val slots = 8
+        val slots = 5
         val shown = if (apps.size < slots) apps.size else slots - 1
         apps.take(shown).forEachIndexed { i, sc ->
             appsRow.addView(appTile(sc.name, logoView(sc.name, sc.id), sc.power) { openShortcut(sc) }.also { enableDrag(it, i) })
         }
-        appsRow.addView(if (apps.size >= slots) appTile("Todos os apps", monogram("⋯", 0xFF3A4150.toInt()), false) { showAllApps() }
-            else appTile("Adicionar app", monogram("+", 0xFF3A4150.toInt()), false) { addApp() })
-        repeat(slots - appsRow.childCount) { appsRow.addView(View(this), LinearLayout.LayoutParams(0, dp(52), 1f)) }
+        appsRow.addView(if (apps.size >= slots) appTile("Todos", glassIcon(R.drawable.ic_grid), false) { showAllApps() }
+            else appTile("Adicionar", glassIcon(R.drawable.ic_add), false) { addApp() })
+        repeat(slots - appsRow.childCount) { appsRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f)) }
     }
 
-    /** Logo do app (sem texto); cena = bolinha vermelha no canto. */
-    private fun appTile(name: String, logo: View, scene: Boolean, click: () -> Unit) = android.widget.FrameLayout(this).apply {
+    /** Logo do app com o nome embaixo; cena = bolinha vermelha no canto. */
+    private fun appTile(name: String, logo: View, scene: Boolean, click: () -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER_HORIZONTAL
         contentDescription = if (scene) "$name (liga a TV e abre)" else name
-        background = getDrawable(R.drawable.touch_round)
         stateListAnimator = AnimatorInflater.loadStateListAnimator(context, R.animator.press)
-        addView(logo, android.widget.FrameLayout.LayoutParams(dp(38), dp(38), android.view.Gravity.CENTER))
-        if (scene) addView(View(context).apply { background = getDrawable(R.drawable.dot); background.setTint(0xFFE53935.toInt()) },
-            android.widget.FrameLayout.LayoutParams(dp(10), dp(10), android.view.Gravity.TOP or android.view.Gravity.END).apply { setMargins(0, dp(2), dp(4), 0) })
-        layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)
+        val box = android.widget.FrameLayout(context)
+        if (pal.raised) logo.elevation = dp(3).toFloat()
+        box.addView(logo, android.widget.FrameLayout.LayoutParams(dp(52), dp(52), android.view.Gravity.CENTER))
+        if (scene) box.addView(View(context).apply { background = getDrawable(R.drawable.dot); background.setTint(0xFFE53935.toInt()); elevation = dp(4).toFloat() },
+            android.widget.FrameLayout.LayoutParams(dp(10), dp(10), android.view.Gravity.TOP or android.view.Gravity.END))
+        addView(box, LinearLayout.LayoutParams(dp(56), dp(56)))
+        addView(TextView(context).apply {
+            text = name; textSize = 11f; setTextColor(pal.muted); singleLine(); gravity = android.view.Gravity.CENTER
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        layoutParams = LinearLayout.LayoutParams(0, dp(78), 1f)
         setOnClickListener { buzz(); click() }
+    }
+
+    private fun TextView.singleLine() { isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END }
+
+    /** Quadrado de vidro com um ícone (Todos / Adicionar). */
+    private fun glassIcon(icon: Int) = android.widget.ImageView(this).apply {
+        setImageResource(icon); scaleType = android.widget.ImageView.ScaleType.CENTER
+        imageTintList = android.content.res.ColorStateList.valueOf(pal.muted)
+        background = Themes.glass(pal.btn, pal.edge, dp(16).toFloat(), dp(1))
     }
 
     private fun showAllApps() {

@@ -5,12 +5,12 @@
     <View android:layout_width="40dp" android:layout_height="4dp" android:layout_gravity="center_horizontal"
         android:layout_marginBottom="10dp" android:background="@drawable/grabber" />
     <LinearLayout style="@style/Row">
-        <Button style="@style/SheetKey" android:tag="KEY_SOURCE" android:drawableTop="@drawable/ic_input" android:text="Fonte" />
+        <Button style="@style/SheetKey" android:tag="KEY_REWIND" android:drawableTop="@drawable/ic_rewind" android:text="Voltar" />
         <Button style="@style/SheetKey" android:tag="KEY_MENU" android:drawableTop="@drawable/ic_menu" android:text="Menu" />
-        <Button style="@style/SheetKey" android:tag="KEY_ENTER" android:drawableTop="@drawable/ic_enter" android:text="Enter" />
+        <Button style="@style/SheetKey" android:tag="KEY_FF" android:drawableTop="@drawable/ic_forward" android:text="Avançar" />
     </LinearLayout>
     <LinearLayout style="@style/Row">
-        <Button style="@style/SheetKey" android:id="@+id/mKeyboard" android:drawableTop="@drawable/ic_keyboard" android:text="Teclado" />
+        <Button style="@style/SheetKey" android:tag="KEY_ENTER" android:drawableTop="@drawable/ic_enter" android:text="Enter" />
         <Button style="@style/SheetKey" android:id="@+id/mPad" android:drawableTop="@drawable/ic_touch" android:text="Touchpad" />
         <Button style="@style/SheetKey" android:id="@+id/mApps" android:drawableTop="@drawable/ic_dialpad" android:text="Todos os apps" />
     </LinearLayout>
