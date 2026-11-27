@@ -50,7 +50,7 @@ class MainActivity : Activity() {
         const val RELEASES_API = "https://api.github.com/repos/Rafajames/controle-tv-samsung/releases/latest"
     }
 
-    private lateinit var tv: SamsungTv
+    private lateinit var tv: Tv
     private lateinit var status: Banner
     private lateinit var ir: IrRemote
     private lateinit var appsRow: LinearLayout
@@ -65,18 +65,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         status = Banner(findViewById(R.id.banner))
-        tv = SamsungTv(this) { msg ->
-            // "Conectando…" e "Conectado" já aparecem na bolinha do topo
-            if (msg != "Conectando…" && msg != "Conectado à TV") runOnUiThread { status.text = msg }
-        }
-        tv.onState = { st -> runOnUiThread { refreshPill(st) } }
-        tv.onIcon = { runOnUiThread { scheduleRenderApps() } }
-        tv.onLaunchFailed = { name -> runOnUiThread { relink(name) } }
-        // Um código conhecido funcionou: o atalho passa a usar esse código
-        tv.onResolved = { name, id -> runOnUiThread {
-            val list = loadApps(); val i = list.indexOfFirst { it.name == name }
-            if (i >= 0 && list[i].id != id) { list[i] = list[i].copy(id = id); saveApps(list) }
-        } }
+        tv = Tv.create(this, tvStatus)
+        bindTv()
         ir = IrRemote(this)
         appsRow = findViewById(R.id.apps)
         wire(findViewById(R.id.root))
@@ -109,7 +99,6 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.statusPill).setOnClickListener { buzz(); showConnection() }
         voiceButton(findViewById(R.id.voice))
-        tv.onIme = { open -> runOnUiThread { tvKeyboardOpen = open; if (open && resumed) showKeyboard() else if (!open) keyboardDialog?.dismiss() } }
         // Uma vez: atalhos iguais aos apps da TV (sai o Xbox, entram YouTube, TV Plus e Browser)
         if (!prefs.getBoolean("appsV2", false)) prefs.edit().putString("apps", defaultApps).putBoolean("appsV2", true).apply()
         renderApps()
@@ -123,6 +112,117 @@ class MainActivity : Activity() {
         paintSegment()
         if (irMode) tv.disconnect() else tv.connect()
         refreshPill(null)
+    }
+
+    // ---------- TV escolhida (Samsung, LG, Roku ou Android TV) ----------
+
+    private val tvStatus: (String) -> Unit = { msg ->
+        // "Conectando…" e "Conectado" já aparecem na bolinha do topo
+        if (msg != "Conectando…" && msg != "Conectado à TV") runOnUiThread { status.text = msg }
+    }
+
+    /** Liga os avisos da TV atual à tela. */
+    private fun bindTv() {
+        tv.onState = { st -> runOnUiThread { refreshPill(st) } }
+        tv.onIcon = { runOnUiThread { scheduleRenderApps() } }
+        tv.onLaunchFailed = { name -> runOnUiThread { relink(name) } }
+        // Um código conhecido funcionou: o atalho passa a usar esse código
+        tv.onResolved = { name, id -> runOnUiThread {
+            val list = loadApps(); val i = list.indexOfFirst { it.name == name }
+            if (i >= 0 && list[i].id != id) { list[i] = list[i].copy(id = id); saveApps(list) }
+        } }
+        tv.onIme = { open -> runOnUiThread { tvKeyboardOpen = open; if (open && resumed) showKeyboard() else if (!open) keyboardDialog?.dismiss() } }
+        tv.onNeedCode = { runOnUiThread { askPairCode() } }
+    }
+
+    /** Troca para outra TV (de qualquer marca) e conecta. */
+    private fun useTv(f: TvFinder.Found) {
+        tv.disconnect()
+        prefs.edit().putString("brand", f.brand).putString("tvName", f.name).apply()
+        tv = Tv.create(this, tvStatus)
+        bindTv()
+        tv.setIp(f.ip)
+        if (irMode) irMode = false
+        status.text = when (f.brand) {
+            "lg" -> "Conectando a ${f.name}: escolha Permitir/Sim na TV"
+            "androidtv" -> "Conectando a ${f.name}: a TV vai mostrar um código"
+            "samsung" -> "Conectando a ${f.name}: aceite o aviso na TV se aparecer"
+            else -> "Conectando a ${f.name}…"
+        }
+        applyMode()
+        renderApps()
+    }
+
+    private val tvLabel get() = tv.tvName ?: tv.model ?: "TV ${tv.brandName}"
+
+    /** Android TV / Google TV: o código de 6 letras/números que aparece na tela da TV. */
+    private fun askPairCode() {
+        if (isFinishing) return
+        val input = EditText(this).apply {
+            hint = "Ex.: 4A7F2C"; isSingleLine = true; textSize = 22f; gravity = android.view.Gravity.CENTER
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            filters = arrayOf(android.text.InputFilter.LengthFilter(6), android.text.InputFilter.AllCaps())
+        }
+        AlertDialog.Builder(this).setTitle("Código da TV")
+            .setMessage("Digite o código de 6 letras/números que apareceu na tela da TV.")
+            .setView(LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(input, LinearLayout.LayoutParams(-1, -2)) })
+            .setPositiveButton("Parear") { _, _ -> tv.submitCode(input.text.toString()) }
+            .setNegativeButton("Cancelar") { _, _ -> tv.submitCode("") }
+            .setCancelable(false).show()
+        input.requestFocus()
+    }
+
+    /** Escolher TV: lista o que respondeu no Wi‑Fi (todas as marcas). */
+    private fun showTvPicker(list: List<TvFinder.Found>) {
+        if (isFinishing) return
+        val p = pal; val d1 = dp(1); val acc = accent
+        lateinit var dialog: AlertDialog
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(20))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(p.sheet); val r = dp(28).toFloat(); cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            }
+        }
+        box.addView(View(this).apply { background = Themes.solid((p.muted and 0x00FFFFFF) or 0x66000000, dp(2).toFloat()) },
+            LinearLayout.LayoutParams(dp(40), dp(4)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12) })
+        box.addView(TextView(this).apply { text = "Escolher TV"; textSize = 20f; setTextColor(p.text); typeface = android.graphics.Typeface.DEFAULT_BOLD })
+        box.addView(TextView(this).apply {
+            textSize = 12f; setTextColor(p.muted)
+            text = if (list.isEmpty()) "Nenhuma TV respondeu. Confira se ela está ligada e no mesmo Wi‑Fi."
+                else "${list.size} encontrada(s) no Wi‑Fi · Samsung, LG, Roku e Android/Google TV"
+        })
+        list.forEach { f ->
+            val current = !irMode && f.ip == tv.ip && f.brand == tv.brand
+            box.addView(LinearLayout(this).apply {
+                gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, p.panel).apply {
+                    cornerRadius = dp(18).toFloat(); setStroke(if (current) dp(2) else d1, if (current) acc else p.edge)
+                }
+                addView(android.widget.ImageView(context).apply {
+                    setImageResource(R.drawable.ic_input); imageTintList = csl(if (current) acc else p.text)
+                    scaleType = android.widget.ImageView.ScaleType.CENTER; background = Themes.glass(p.btn, p.edge, dp(14).toFloat(), d1)
+                }, LinearLayout.LayoutParams(dp(46), dp(46)))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(8), 0)
+                    addView(TextView(context).apply { text = f.name; textSize = 15f; setTextColor(p.text); typeface = android.graphics.Typeface.DEFAULT_BOLD })
+                    addView(TextView(context).apply { text = "${Tv.brands[f.brand]} · ${f.ip}"; textSize = 12f; setTextColor(p.muted) })
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(TextView(context).apply { text = if (current) "Conectada" else "Conectar"; textSize = 13f; setTextColor(acc); typeface = android.graphics.Typeface.DEFAULT_BOLD })
+                setOnClickListener { buzz(); dialog.dismiss(); if (!current) useTv(f) }
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        }
+        fun action(label: String, click: () -> Unit) = Button(this).apply {
+            text = label; isAllCaps = false; setTextColor(p.text); textSize = 15f
+            background = Themes.pressable(p, p.btn, dp(16).toFloat(), d1); minHeight = dp(50)
+            setOnClickListener { buzz(); dialog.dismiss(); click() }
+        }
+        box.addView(action("Procurar de novo") { scan() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
+        box.addView(action("Digitar IP manualmente") { askIp() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        if (ir.available) box.addView(action("Usar infravermelho (sem Wi‑Fi)") { showConnection() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        dialog = AlertDialog.Builder(this).setView(android.widget.ScrollView(this).apply { addView(box) }).create()
+        dialog.window?.apply { setGravity(android.view.Gravity.BOTTOM); setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)) }
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     // ---------- Tema (visual cristal) ----------
@@ -273,24 +373,24 @@ class MainActivity : Activity() {
     // ---------- Status (bolinha colorida) ----------
 
     private var autoScanned = false
-    private var lastState: SamsungTv.State? = null
+    private var lastState: Tv.State? = null
 
     /** event = estado novo vindo da TV; null = só redesenhar com o último estado. */
-    private fun refreshPill(event: SamsungTv.State?) {
+    private fun refreshPill(event: Tv.State?) {
         if (event != null) lastState = event
         val st = lastState
         val (color, text) = when {
-            irMode -> 0xFF64B5F6.toInt() to "Modo IR"
-            tv.connected -> 0xFF4CAF50.toInt() to "Conectado"
-            st == SamsungTv.State.CONNECTING -> 0xFFFFB300.toInt() to "Conectando…"
+            irMode -> 0xFF64B5F6.toInt() to "Infravermelho · ${if (ir.brand == "lg") "LG" else "Samsung"}"
+            tv.connected -> 0xFF4CAF50.toInt() to tvLabel
+            st == Tv.State.CONNECTING -> 0xFFFFB300.toInt() to "Conectando…"
             tv.ip == null -> 0xFFE53935.toInt() to "TV não encontrada"
             else -> 0xFFE53935.toInt() to "TV desligada"
         }
         findViewById<View>(R.id.statusDot).background.setTint(color)
         findViewById<TextView>(R.id.statusLabel).text = text
-        if (event == SamsungTv.State.CONNECTED) { autoScanned = false; scheduleRenderApps() }
+        if (event == Tv.State.CONNECTED) { autoScanned = false; scheduleRenderApps() }
         // Não conectou no IP salvo: procura a TV na rede uma vez (o roteador pode ter trocado o IP)
-        if (event == SamsungTv.State.FAILED && !irMode && !autoScanned) {
+        if (event == Tv.State.FAILED && !irMode && !autoScanned) {
             autoScanned = true
             val old = tv.ip
             thread {
@@ -368,6 +468,7 @@ class MainActivity : Activity() {
         touch.onToggleMode = {
             buzz(Buzz.HEAVY)
             if (irMode && !touch.mouse) status.text = "O modo mouse só funciona no Wi-Fi: toque em Wi-Fi no topo"
+            else if (!tv.hasMouse && !touch.mouse) status.text = "O modo mouse só funciona em TV Samsung e LG"
             else {
                 touch.mouse = !touch.mouse
                 status.text = if (touch.mouse) "Modo mouse: use no navegador da TV" else "Modo setas: deslize para navegar"
@@ -474,7 +575,7 @@ class MainActivity : Activity() {
         // TV conectada
         val tvSub = when {
             irMode -> "Modo infravermelho"
-            tv.connected -> "Conectada · ${tv.ip} · Wi‑Fi"
+            tv.connected -> "${tv.brandName} · ${tv.ip} · Wi‑Fi"
             tv.ip != null -> "Desconectada · ${tv.ip}"
             else -> "Nenhuma TV encontrada ainda"
         } + (tv.voiceSupport?.let { if (it) " · voz" else "" } ?: "")
@@ -487,14 +588,14 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(dp(44), dp(44)))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(8), 0)
-                addView(TextView(context).apply { text = tv.model ?: "TV Samsung"; textSize = 15f; typeface = bold; setTextColor(p.text) })
+                addView(TextView(context).apply { text = tvLabel; textSize = 15f; typeface = bold; setTextColor(p.text) })
                 addView(note(tvSub))
             }, LinearLayout.LayoutParams(0, wrap, 1f))
             addView(TextView(context).apply {
                 text = "Trocar"; textSize = 13f; typeface = bold; setTextColor(acc); gravity = android.view.Gravity.CENTER
                 setPadding(dp(14), 0, dp(14), 0); minHeight = dp(38)
                 background = Themes.solid((acc and 0x00FFFFFF) or 0x24000000, dp(19).toFloat())
-                setOnClickListener { buzz(); askIp() }
+                setOnClickListener { buzz(); dlg.dismiss(); scan() }
             })
         }, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(16) })
 
@@ -597,22 +698,32 @@ class MainActivity : Activity() {
     /** IP da TV digitado à mão, ou procurar no Wi-Fi. */
     private fun askIp() {
         val input = EditText(this).apply { hint = "Ex.: 192.168.0.15"; inputType = InputType.TYPE_CLASS_PHONE; setText(tv.ip ?: "") }
-        AlertDialog.Builder(this).setTitle("Trocar de TV")
-            .setMessage("IP da TV — na TV: Configurações → Geral → Rede → Status da rede → Configurações de IP")
+        AlertDialog.Builder(this).setTitle("IP da TV")
+            .setMessage("Na TV, procure em Configurações › Rede › Status/Informações da rede")
             .setView(LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(input, LinearLayout.LayoutParams(-1, -2)) })
-            .setPositiveButton("Conectar") { _, _ -> input.text.toString().trim().takeIf { it.isNotEmpty() }?.let { tv.setIp(it); tv.connect() } }
+            .setPositiveButton("Conectar") { _, _ ->
+                val ip = input.text.toString().trim().ifEmpty { return@setPositiveButton }
+                status.text = "Verificando a TV em $ip…"
+                thread {
+                    val f = TvFinder.identify(ip)
+                    runOnUiThread { if (f != null) useTv(f) else status.text = "Nenhuma TV respondeu em $ip" }
+                }
+            }
             .setNeutralButton("Procurar no Wi‑Fi") { _, _ -> scan() }
             .setNegativeButton("Cancelar", null).show()
     }
 
     /** Conexão: escolher IR ou Wi-Fi, reconectar ou procurar a TV. */
     private fun showConnection() {
-        val modes = if (ir.available) arrayOf("Wi-Fi (rede)", "Infravermelho (IR)") else arrayOf("Wi-Fi (rede)")
-        val info = tv.model?.let { "TV: $it" } ?: tv.ip?.let { "TV em $it" } ?: "TV ainda não encontrada"
-        AlertDialog.Builder(this).setTitle("Conexão · $info")
-            .setSingleChoiceItems(modes, if (irMode) 1 else 0) { d, w ->
-                buzz(); val ir = w == 1
-                if (ir != irMode) { irMode = ir; applyMode() }
+        val modes = if (ir.available) arrayOf("Wi-Fi (rede) · $tvLabel", "Infravermelho · TV Samsung", "Infravermelho · TV LG")
+            else arrayOf("Wi-Fi (rede) · $tvLabel")
+        val sel = if (!irMode) 0 else if (ir.brand == "lg") 2 else 1
+        AlertDialog.Builder(this).setTitle("Conexão")
+            .setSingleChoiceItems(modes, sel) { d, w ->
+                buzz()
+                if (w > 0) ir.brand = if (w == 2) "lg" else "samsung"
+                val useIr = w > 0
+                if (useIr != irMode) { irMode = useIr; applyMode() } else refreshPill(null)
                 d.dismiss()
             }
             .setPositiveButton("Reconectar") { _, _ ->
@@ -653,13 +764,17 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Procura TVs de todas as marcas no Wi‑Fi. Uma só: conecta direto; várias: deixa escolher. */
     private fun scan() {
-        status.text = "Procurando a TV na rede Wi-Fi…"
+        status.text = "Procurando TVs no Wi‑Fi…"
         thread {
-            val ip = tv.scan()
+            val list = TvFinder.find(this)
             runOnUiThread {
-                if (ip != null) tv.connect()
-                else status.text = "Nenhuma TV encontrada. Ligue a TV, confira o Wi-Fi e toque em ⚙"
+                when {
+                    list.size == 1 && tv.ip == null -> useTv(list[0])
+                    list.size == 1 && list[0].ip == tv.ip && list[0].brand == tv.brand -> { status.text = "TV encontrada"; tv.connect() }
+                    else -> showTvPicker(list)
+                }
             }
         }
     }

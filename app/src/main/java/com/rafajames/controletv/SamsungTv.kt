@@ -27,29 +27,16 @@ import javax.net.ssl.X509TrustManager
 import kotlin.concurrent.thread
 
 /** Fala com TVs Samsung Tizen (2016+) pela rede local, porta 8002. */
-class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
+class SamsungTv(ctx: Context, status: (String) -> Unit) : Tv(ctx, status) {
 
-    enum class State { CONNECTING, CONNECTED, FAILED, OFFLINE }
-    /** App instalado na TV. icon = caminho do ícone dentro da TV. */
-    data class TvApp(val name: String, val id: String, val type: Int, val icon: String)
+    override val brand = "samsung"
+    override val brandName = "Samsung"
+    override val hasMouse = true
 
-    /** Estado da conexão (para a bolinha colorida) e aviso quando chega um ícone novo. */
-    @Volatile var onState: ((State) -> Unit)? = null
-    @Volatile var onIcon: (() -> Unit)? = null
-    private val iconDir = File(ctx.filesDir, "icons").apply { mkdirs() }
-    fun iconFile(appId: String) = File(iconDir, appId.filter { it.isLetterOrDigit() || it == '.' } + ".png")
-
-    private val prefs = ctx.getSharedPreferences("tv", Context.MODE_PRIVATE)
-    val ip: String? get() = prefs.getString("ip", null)
-
-    @Volatile var connected = false; private set
     @Volatile private var connecting = false
     @Volatile private var pending: String? = null
     @Volatile private var pendingLaunch: Pair<String, String>? = null
-    @Volatile var installed: List<TvApp> = emptyList(); private set
     private var ws: WebSocket? = null
-    /** Avisado quando a TV abre (true) ou fecha (false) o teclado dela. */
-    @Volatile var onIme: ((Boolean) -> Unit)? = null
 
     // A TV usa certificado próprio: aceitamos qualquer um (só falamos com a TV da rede local)
     private val client: OkHttpClient = run {
@@ -67,12 +54,12 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
             .build()
     }
 
-    fun setIp(newIp: String) {
+    override fun setIp(newIp: String) {
         if (newIp != ip) prefs.edit().putString("ip", newIp).remove("token").remove("mac").apply()
         disconnect()
     }
 
-    fun connect() {
+    override fun connect() {
         val host = ip ?: return
         if (connected || connecting) return
         connecting = true
@@ -141,31 +128,31 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         })
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         ws?.close(1000, null); ws = null
         connected = false; connecting = false
         onState?.invoke(State.OFFLINE)
     }
 
     /** cmd: "Click" (apertar e soltar), "Press" (segurar) ou "Release" (soltar). */
-    fun key(k: String, cmd: String = "Click") = control(JSONObject()
+    override fun key(k: String, cmd: String) = control(JSONObject()
         .put("Cmd", cmd).put("DataOfCmd", k)
         .put("Option", "false").put("TypeOfRemote", "SendRemoteKey"))
 
     /** Escreve no campo de texto aberto na TV (navegador, pesquisa…). */
-    fun text(t: String) = control(JSONObject()
+    override fun text(t: String) = control(JSONObject()
         .put("Cmd", Base64.encodeToString(t.toByteArray(), Base64.NO_WRAP))
         .put("DataOfCmd", "base64").put("TypeOfRemote", "SendInputString"))
 
     /** Move o cursor do mouse da TV (navegador) em pixels relativos. */
-    fun mouseMove(dx: Int, dy: Int) = control(JSONObject().put("Cmd", "Move")
+    override fun mouseMove(dx: Int, dy: Int) = control(JSONObject().put("Cmd", "Move")
         .put("Position", JSONObject().put("x", dx).put("y", dy).put("Time", System.currentTimeMillis().toString()))
         .put("TypeOfRemote", "ProcessMouseDevice"))
 
-    fun mouseClick() = control(JSONObject().put("Cmd", "LeftClick").put("TypeOfRemote", "ProcessMouseDevice"))
+    override fun mouseClick() = control(JSONObject().put("Cmd", "LeftClick").put("TypeOfRemote", "ProcessMouseDevice"))
 
     /** Confirma o texto e fecha o teclado da TV. */
-    fun textEnd() = control(JSONObject().put("Cmd", "").put("DataOfCmd", "").put("TypeOfRemote", "SendInputEnd"))
+    override fun textEnd() = control(JSONObject().put("Cmd", "").put("DataOfCmd", "").put("TypeOfRemote", "SendInputEnd"))
 
     private fun control(params: JSONObject) {
         val msg = JSONObject().put("method", "ms.remote.control").put("params", params).toString()
@@ -179,7 +166,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         .toString()
 
     /** Abre um app na TV. Procura o ID pelo nome na lista da TV; se não achar, usa o ID salvo. */
-    fun launch(name: String, id: String) {
+    override fun launch(name: String, id: String) {
         if (ip == null) { status("Toque em ⚙ para achar a TV no Wi-Fi primeiro"); return }
         pendingLaunch = name to id
         if (connected) runPendingLaunch() else { status("Abrindo $name pela rede…"); connect() }
@@ -197,8 +184,6 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         thread { openApp(name, appId, type) }
     }
 
-    /** Avisado quando o app não existe na TV (404), para escolher o certo na lista. */
-    @Volatile var onLaunchFailed: ((String) -> Unit)? = null
 
     /**
      * TVs 2021+ ignoram o "ed.apps.launch" do WebSocket; o que funciona é o REST da TV
@@ -226,8 +211,6 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         }
     }
 
-    /** Avisado quando um código conhecido funcionou, para o atalho guardar esse código. */
-    @Volatile var onResolved: ((String, String) -> Unit)? = null
 
     /** App conhecido: nome, chave (para casar com o nome do atalho) e códigos possíveis na TV. */
     private class Known(val name: String, val key: String, val ids: List<String>)
@@ -266,10 +249,6 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     )
     private val knownIds = catalog.associate { it.key to it.ids } + ("browser" to listOf("org.tizen.browser", "3201907018784"))
 
-    /** De onde veio a lista de apps: "TV", "sondagem" ou "nenhuma". */
-    @Volatile var appsSource = "nenhuma"; private set
-    /** Último erro que a TV mandou (ms.error), para o diagnóstico no ⚙. */
-    @Volatile var lastError: String? = null; private set
     @Volatile private var gotList = false
     @Volatile private var appsGen = 0
 
@@ -277,7 +256,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
      * Pede a lista de apps. Se a TV não responder em 3 s, pede de novo;
      * se continuar calada (comum em TVs 2021+), pergunta app por app (sondagem).
      */
-    fun refreshApps() {
+    override fun refreshApps() {
         if (!connected) { connect(); return }
         val gen = ++appsGen
         gotList = false
@@ -334,18 +313,9 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
             .execute().use { it.code }
     }.getOrDefault(-1)
 
-    /** Acha o app da TV pelo nome do atalho (igual ou parecido). */
-    fun findApp(name: String): TvApp? {
-        val n = norm(name)
-        if (n.isEmpty()) return null
-        return installed.firstOrNull { norm(it.name) == n }
-            ?: installed.firstOrNull { norm(it.name).contains(n) || n.contains(norm(it.name)) }
-    }
-
-    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
 
     /** Ligado: desliga. Desligado: manda Wake-on-LAN e tenta conectar. */
-    fun power() {
+    override fun power() {
         if (connected) { send("KEY_POWER"); return }
         val mac = prefs.getString("mac", null)
         if (mac == null) {
@@ -363,21 +333,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         }
     }
 
-    private fun wake(mac: String) = runCatching {
-        val m = mac.split(':', '-').map { it.toInt(16).toByte() }
-        val data = ByteArray(6) { 0xFF.toByte() } + List(16) { m }.flatten().toByteArray()
-        val host = ip ?: return@runCatching
-        DatagramSocket().use { s ->
-            s.broadcast = true
-            listOf("255.255.255.255", host.substringBeforeLast('.') + ".255", host).forEach { h ->
-                repeat(3) { s.send(DatagramPacket(data, data.size, InetAddress.getByName(h), 9)) }
-            }
-        }
-    }
-
     /** Modelo da TV e se ela aceita comando de voz (vem da própria TV). */
-    @Volatile var model: String? = null; private set
-    @Volatile var voiceSupport: Boolean? = null; private set
 
     private fun learnMac(host: String) {
         val dev = info(host, 3000)?.optJSONObject("device") ?: return
@@ -394,7 +350,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     }.getOrNull()?.takeIf { it.has("device") }
 
     /** Procura a TV na rede Wi-Fi (bloqueante; chamar fora da thread principal). */
-    fun scan(): String? {
+    override fun scan(): String? {
         val prefix = localPrefix() ?: return null
         val found = AtomicReference<String?>()
         val pool = Executors.newFixedThreadPool(64)

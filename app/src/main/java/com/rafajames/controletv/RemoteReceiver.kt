@@ -31,7 +31,7 @@ class RemoteReceiver : BroadcastReceiver() {
                 if (ir.available && prefs.getBoolean("ir", true)) {
                     ir.send(key); Thread.sleep(400)
                 } else {
-                    val tv = SamsungTv(ctx.applicationContext) { }
+                    val tv = Tv.create(ctx.applicationContext) { }
                     if (tv.ip == null) return@thread
                     tv.connect()
                     repeat(30) { if (!tv.connected) Thread.sleep(100) }
