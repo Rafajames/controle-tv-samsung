@@ -8,6 +8,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.io.File
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.HttpURLConnection
@@ -27,6 +28,16 @@ import kotlin.concurrent.thread
 /** Fala com TVs Samsung Tizen (2016+) pela rede local, porta 8002. */
 class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
 
+    enum class State { CONNECTING, CONNECTED, FAILED, OFFLINE }
+    /** App instalado na TV. icon = caminho do ícone dentro da TV. */
+    data class TvApp(val name: String, val id: String, val type: Int, val icon: String)
+
+    /** Estado da conexão (para a bolinha colorida) e aviso quando chega um ícone novo. */
+    @Volatile var onState: ((State) -> Unit)? = null
+    @Volatile var onIcon: (() -> Unit)? = null
+    private val iconDir = File(ctx.filesDir, "icons").apply { mkdirs() }
+    fun iconFile(appId: String) = File(iconDir, appId.filter { it.isLetterOrDigit() || it == '.' } + ".png")
+
     private val prefs = ctx.getSharedPreferences("tv", Context.MODE_PRIVATE)
     val ip: String? get() = prefs.getString("ip", null)
 
@@ -34,8 +45,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     @Volatile private var connecting = false
     @Volatile private var pending: String? = null
     @Volatile private var pendingLaunch: Pair<String, String>? = null
-    /** Apps instalados na TV: nome, appId, tipo */
-    @Volatile var installed: List<Triple<String, String, Int>> = emptyList(); private set
+    @Volatile var installed: List<TvApp> = emptyList(); private set
     private var ws: WebSocket? = null
     /** Avisado quando a TV abre (true) ou fecha (false) o teclado dela. */
     @Volatile var onIme: ((Boolean) -> Unit)? = null
@@ -65,6 +75,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         val host = ip ?: return
         if (connected || connecting) return
         connecting = true
+        onState?.invoke(State.CONNECTING)
         val token = prefs.getString("token", null)
         status(if (token == null) "Conectando… aceite o aviso na TV" else "Conectando…")
         val name = Base64.encodeToString("Controle Poco".toByteArray(), Base64.NO_WRAP)
@@ -76,6 +87,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
                 when (msg.optString("event")) {
                     "ms.channel.connect" -> {
                         connected = true; connecting = false
+                        onState?.invoke(State.CONNECTED)
                         msg.optJSONObject("data")?.optString("token")?.takeIf { it.isNotEmpty() }
                             ?.let { prefs.edit().putString("token", it).apply() }
                         status("Conectado à TV")
@@ -88,14 +100,26 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
                         val arr = msg.optJSONObject("data")?.optJSONArray("data")
                         if (arr != null) installed = (0 until arr.length()).map {
                             val a = arr.getJSONObject(it)
-                            Triple(a.optString("name"), a.optString("appId"), a.optInt("app_type", 2))
-                        }.filter { it.second.isNotEmpty() }.sortedBy { it.first.lowercase() }
+                            TvApp(a.optString("name"), a.optString("appId"), a.optInt("app_type", 2), a.optString("icon"))
+                        }.filter { it.id.isNotEmpty() }.sortedBy { it.name.lowercase() }
                         runPendingLaunch()
+                        // Pede à TV o ícone de cada app que ainda não está guardado no celular
+                        installed.filter { it.icon.isNotEmpty() && !iconFile(it.id).exists() }.forEach {
+                            webSocket.send(emit("ed.apps.icon", JSONObject().put("iconPath", it.icon)))
+                        }
+                    }
+                    "ed.apps.icon" -> {
+                        val d = msg.optJSONObject("data") ?: return
+                        val app = installed.firstOrNull { it.icon == d.optString("iconPath") } ?: return
+                        val img = d.optString("imageData").ifEmpty { return }
+                        runCatching { iconFile(app.id).writeBytes(Base64.decode(img, Base64.DEFAULT)) }
+                            .onSuccess { onIcon?.invoke() }
                     }
                     "ms.remote.imeStart" -> onIme?.invoke(true)
                     "ms.remote.imeEnd" -> onIme?.invoke(false)
                     "ms.channel.unauthorized" -> {
                         connecting = false
+                        onState?.invoke(State.FAILED)
                         status("A TV recusou. Toque num botão e aceite o aviso na TV")
                     }
                 }
@@ -103,11 +127,13 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (webSocket != ws) return
                 connected = false; connecting = false
-                status("Sem conexão com a TV ($host). Toque em ⚙ para procurar")
+                onState?.invoke(State.FAILED)
+                status("Não achei a TV. Se estiver desligada, toque no botão vermelho para ligar")
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (webSocket != ws) return
                 connected = false; connecting = false
+                onState?.invoke(State.OFFLINE)
             }
         })
     }
@@ -115,6 +141,7 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
     fun disconnect() {
         ws?.close(1000, null); ws = null
         connected = false; connecting = false
+        onState?.invoke(State.OFFLINE)
     }
 
     /** cmd: "Click" (apertar e soltar), "Press" (segurar) ou "Release" (soltar). */
@@ -152,14 +179,20 @@ class SamsungTv(ctx: Context, private val status: (String) -> Unit) {
         val (name, id) = pendingLaunch ?: return
         if (!connected) return
         pendingLaunch = null
-        val n = norm(name)
-        val app = installed.firstOrNull { norm(it.first) == n }
-            ?: installed.firstOrNull { norm(it.first).contains(n) || n.contains(norm(it.first)) }
-        val appId = app?.second ?: id.ifEmpty { null }
+        val app = findApp(name)
+        val appId = app?.id ?: id.ifEmpty { null }
         if (appId == null) { status("Não achei \"$name\" na TV. Segure o atalho para escolher o app"); return }
-        val type = if (app?.third == 4) "NATIVE_LAUNCH" else "DEEP_LINK"
+        val type = if (app?.type == 4) "NATIVE_LAUNCH" else "DEEP_LINK"
         ws?.send(emit("ed.apps.launch", JSONObject().put("appId", appId).put("action_type", type)))
         status("Abrindo $name")
+    }
+
+    /** Acha o app da TV pelo nome do atalho (igual ou parecido). */
+    fun findApp(name: String): TvApp? {
+        val n = norm(name)
+        if (n.isEmpty()) return null
+        return installed.firstOrNull { norm(it.name) == n }
+            ?: installed.firstOrNull { norm(it.name).contains(n) || n.contains(norm(it.name)) }
     }
 
     private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }

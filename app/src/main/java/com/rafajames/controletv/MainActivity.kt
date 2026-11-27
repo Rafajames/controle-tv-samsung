@@ -47,9 +47,10 @@ class MainActivity : Activity() {
     }
 
     private lateinit var tv: SamsungTv
-    private lateinit var status: TextView
+    private lateinit var status: Banner
     private lateinit var ir: IrRemote
-    private lateinit var modeBtn: Button
+    private lateinit var segIr: View
+    private lateinit var segWifi: View
     private lateinit var apps1: LinearLayout
     private lateinit var apps2: LinearLayout
     private val prefs by lazy { getSharedPreferences("tv", MODE_PRIVATE) }
@@ -62,10 +63,16 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        status = findViewById(R.id.status)
-        tv = SamsungTv(this) { msg -> runOnUiThread { status.text = msg } }
+        status = Banner(findViewById(R.id.banner))
+        tv = SamsungTv(this) { msg ->
+            // "Conectando…" e "Conectado" já aparecem na bolinha do topo
+            if (msg != "Conectando…" && msg != "Conectado à TV") runOnUiThread { status.text = msg }
+        }
+        tv.onState = { st -> runOnUiThread { refreshPill(st) } }
+        tv.onIcon = { runOnUiThread { scheduleRenderApps() } }
         ir = IrRemote(this)
-        modeBtn = findViewById(R.id.mode)
+        segIr = findViewById(R.id.segIr)
+        segWifi = findViewById(R.id.segWifi)
         apps1 = findViewById(R.id.apps1)
         apps2 = findViewById(R.id.apps2)
         wire(findViewById(R.id.root))
@@ -73,12 +80,23 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.power).setOnClickListener { buzz(Buzz.HEAVY); if (irMode) ir.send("KEY_POWER") else tv.power() }
         findViewById<View>(R.id.dialpad).setOnClickListener { buzz(); showNumpad() }
         fitDpad()
-        modeBtn.setOnClickListener {
+        segIr.setOnClickListener {
             buzz()
             if (!ir.available) { status.text = "Este celular não tem infravermelho"; return@setOnClickListener }
-            irMode = !irMode; applyMode()
+            if (!irMode) { irMode = true; applyMode() }
         }
-        findViewById<View>(R.id.keyboard).setOnClickListener { buzz(); showKeyboard() }
+        segWifi.setOnClickListener { buzz(); if (irMode) { irMode = false; applyMode() } }
+        findViewById<View>(R.id.statusPill).setOnClickListener {
+            buzz()
+            when {
+                irMode -> status.text = "Modo IR: aponte o topo do celular para a TV"
+                tv.ip == null -> scan()
+                else -> { autoScanned = false; tv.connect() }
+            }
+        }
+        findViewById<View>(R.id.keyboard).setOnClickListener {
+            buzz(); if (irMode) status.text = "O teclado só funciona no Wi-Fi: toque em Wi-Fi no topo" else showKeyboard()
+        }
         voiceButton(findViewById(R.id.voice))
         tv.onIme = { open -> runOnUiThread { tvKeyboardOpen = open; if (open && resumed) showKeyboard() else if (!open) keyboardDialog?.dismiss() } }
         renderApps()
@@ -89,10 +107,59 @@ class MainActivity : Activity() {
     }
 
     private fun applyMode() {
-        modeBtn.text = if (irMode) "IR" else "Wi-Fi"
-        modeBtn.setCompoundDrawablesRelativeWithIntrinsicBounds(if (irMode) R.drawable.ic_ir else R.drawable.ic_wifi, 0, 0, 0)
-        if (irMode) { tv.disconnect(); status.text = "Infravermelho: aponte o celular para a TV" }
-        else tv.connect()
+        segIr.isSelected = irMode
+        segWifi.isSelected = !irMode
+        // No IR, o que depende do Wi-Fi fica esmaecido (os atalhos ainda tentam pela rede)
+        val a = if (irMode) 0.45f else 1f
+        apps1.alpha = a; apps2.alpha = a; findViewById<View>(R.id.keyboard).alpha = a
+        if (irMode) tv.disconnect() else tv.connect()
+        refreshPill(null)
+    }
+
+    // ---------- Status (bolinha colorida) ----------
+
+    private var autoScanned = false
+    private var lastState: SamsungTv.State? = null
+
+    /** event = estado novo vindo da TV; null = só redesenhar com o último estado. */
+    private fun refreshPill(event: SamsungTv.State?) {
+        if (event != null) lastState = event
+        val st = lastState
+        val (color, text) = when {
+            irMode -> 0xFF64B5F6.toInt() to "Modo IR"
+            tv.connected -> 0xFF4CAF50.toInt() to "Conectado"
+            st == SamsungTv.State.CONNECTING -> 0xFFFFB300.toInt() to "Conectando…"
+            tv.ip == null -> 0xFFE53935.toInt() to "TV não encontrada"
+            else -> 0xFFE53935.toInt() to "TV desligada"
+        }
+        findViewById<View>(R.id.statusDot).background.setTint(color)
+        findViewById<TextView>(R.id.statusLabel).text = text
+        if (event == SamsungTv.State.CONNECTED) { autoScanned = false; scheduleRenderApps() }
+        // Não conectou no IP salvo: procura a TV na rede uma vez (o roteador pode ter trocado o IP)
+        if (event == SamsungTv.State.FAILED && !irMode && !autoScanned) {
+            autoScanned = true
+            val old = tv.ip
+            thread {
+                val ip = tv.scan()
+                runOnUiThread { if (ip != null && ip != old) { status.text = "Achei a TV em outro endereço ($ip)"; tv.connect() } else if (ip != null) tv.connect() }
+            }
+        }
+    }
+
+    /** Aviso flutuante: aparece por alguns segundos e some (não empurra a tela). */
+    private inner class Banner(private val view: TextView) {
+        private val hide = Runnable { view.animate().alpha(0f).setDuration(250).withEndAction { view.visibility = View.GONE } }
+        var text: CharSequence = ""
+            set(v) {
+                field = v
+                if (v.isEmpty()) return
+                view.text = v
+                if (view.visibility != View.VISIBLE) { view.alpha = 0f; view.visibility = View.VISIBLE }
+                view.animate().alpha(1f).setDuration(150)
+                handler.removeCallbacks(hide)
+                handler.postDelayed(hide, 3000L + v.length * 40L)
+            }
+        init { view.setOnClickListener { handler.removeCallbacks(hide); hide.run() } }
     }
 
     private fun press(key: String) = if (irMode) ir.send(key) else tv.key(key)
@@ -227,7 +294,7 @@ class MainActivity : Activity() {
 
     /** Só o Wi-Fi manda texto; pelo infravermelho não existe esse comando. */
     private fun canType(): Boolean {
-        if (irMode) { status.text = "Para escrever, troque para Wi-Fi (botão IR no topo)"; return false }
+        if (irMode) { status.text = "Para escrever, toque em Wi-Fi no topo"; return false }
         if (tv.ip == null) { status.text = "Toque em ⚙ para achar a TV no Wi-Fi primeiro"; return false }
         return true
     }
@@ -376,19 +443,72 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun chip(text: String) = Button(this).apply {
-        this.text = text
-        isAllCaps = false
-        setTextColor(Color.WHITE)
-        textSize = 12f
-        isSingleLine = true
-        ellipsize = android.text.TextUtils.TruncateAt.END
+    // ---------- Atalhos com logo ----------
+
+    /** Cor da marca e inicial, usadas enquanto a logo verdadeira (vinda da TV) não chegou. */
+    private val brands = listOf(
+        "netflix" to (0xFFE50914 to "N"), "primevideo" to (0xFF00A8E1 to "prime"), "prime" to (0xFF00A8E1 to "prime"),
+        "disney" to (0xFF0E2A8C to "D+"), "crunchyroll" to (0xFFF47521 to "C"), "xbox" to (0xFF107C10 to "X"),
+        "youtube" to (0xFFFF0000 to "▶"), "globoplay" to (0xFFFF1E4F to "g"), "max" to (0xFF002BE7 to "max"),
+        "hbo" to (0xFF5822B4 to "HBO"), "spotify" to (0xFF1DB954 to "S"), "twitch" to (0xFF9146FF to "T"),
+        "paramount" to (0xFF0064FF to "P+"), "appletv" to (0xFF1C1C1E to "tv"), "pluto" to (0xFF2D2D2D to "P"),
+        "deezer" to (0xFFA238FF to "D"), "starplus" to (0xFF0E2A8C to "D+")
+    )
+    private val palette = intArrayOf(0xFF5C6BC0.toInt(), 0xFF26A69A.toInt(), 0xFFAB47BC.toInt(), 0xFFEF6C00.toInt(), 0xFF8D6E63.toInt())
+
+    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
+    /** Logo guardada do app (a TV manda quando conecta pelo Wi-Fi). */
+    private fun iconFor(name: String, id: String): android.graphics.Bitmap? {
+        val key = "icon_" + norm(name)
+        val appId = tv.findApp(name)?.id?.also { prefs.edit().putString(key, it).apply() }
+            ?: prefs.getString(key, null) ?: id.ifEmpty { return null }
+        val f = tv.iconFile(appId)
+        return if (f.exists()) android.graphics.BitmapFactory.decodeFile(f.path) else null
+    }
+
+    private fun rounded(color: Int) = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(9).toFloat(); setColor(color) }
+
+    private fun tile(label: String, logo: View, click: () -> Unit, long: (() -> Unit)? = null) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = android.view.Gravity.CENTER
         background = getDrawable(R.drawable.btn)
         stateListAnimator = AnimatorInflater.loadStateListAnimator(context, R.animator.press)
-        setPadding(dp(4), 0, dp(4), 0)
-        minHeight = 0; minimumHeight = 0; minWidth = 0; minimumWidth = 0
-        layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) }
+        contentDescription = label
+        addView(logo, LinearLayout.LayoutParams(dp(32), dp(32)))
+        addView(TextView(context).apply {
+            text = label; textSize = 10.5f; setTextColor(0xFFB0BEC5.toInt()); isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.END; gravity = android.view.Gravity.CENTER
+            setPadding(dp(3), dp(3), dp(3), 0)
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        layoutParams = LinearLayout.LayoutParams(0, dp(64), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) }
+        setOnClickListener { buzz(); click() }
+        long?.let { l -> setOnLongClickListener { l(); true } }
     }
+
+    private fun logoView(name: String, id: String): View {
+        iconFor(name, id)?.let { bmp ->
+            return android.widget.ImageView(this).apply {
+                setImageBitmap(bmp); scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                background = rounded(0xFF000000.toInt()); clipToOutline = true
+            }
+        }
+        val n = norm(name)
+        val (color, mono) = brands.firstOrNull { n.contains(it.first) }?.second?.let { it.first.toInt() to it.second }
+            ?: (palette[Math.floorMod(n.hashCode(), palette.size)] to name.take(1).uppercase())
+        return monogram(mono, color)
+    }
+
+    private fun monogram(text: String, color: Int) = TextView(this).apply {
+        this.text = text; gravity = android.view.Gravity.CENTER; setTextColor(Color.WHITE)
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        textSize = when { text.length >= 4 -> 9f; text.length == 3 -> 10.5f; else -> 15f }
+        background = rounded(color)
+    }
+
+    private val renderAppsRunnable = Runnable { renderApps() }
+    /** Junta vários ícones que chegam juntos numa só atualização da tela. */
+    private fun scheduleRenderApps() { handler.removeCallbacks(renderAppsRunnable); handler.postDelayed(renderAppsRunnable, 300) }
 
     /** Grade fixa de 8 lugares (4 + 4). Com mais de 7 apps, o último vira "Mais". */
     private fun renderApps() {
@@ -397,14 +517,11 @@ class MainActivity : Activity() {
         val shown = if (apps.size <= 7) apps.size else 7
         val cells = mutableListOf<View>()
         apps.take(shown).forEachIndexed { i, (name, id) ->
-            cells += chip(name).apply {
-                setOnClickListener { buzz(); tv.launch(name, id) }
-                setOnLongClickListener { editApp(i); true }
-            }
+            cells += tile(name, logoView(name, id), { tv.launch(name, id) }, { editApp(i) })
         }
-        cells += if (apps.size > 7) chip("Mais…").apply { setOnClickListener { buzz(); showAllApps() } }
-            else chip("＋").apply { setOnClickListener { buzz(); addApp() } }
-        while (cells.size < 8) cells += View(this).apply { layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) } }
+        cells += if (apps.size > 7) tile("Mais", monogram("⋯", 0xFF3A4150.toInt()), { showAllApps() })
+            else tile("Adicionar", monogram("+", 0xFF3A4150.toInt()), { addApp() })
+        while (cells.size < 8) cells += View(this).apply { layoutParams = LinearLayout.LayoutParams(0, dp(64), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) } }
         cells.forEachIndexed { i, v -> (if (i < 4) apps1 else apps2).addView(v) }
     }
 
@@ -441,7 +558,7 @@ class MainActivity : Activity() {
             manualApp(done); return
         }
         AlertDialog.Builder(this).setTitle("Apps da TV")
-            .setItems(apps.map { it.first }.toTypedArray()) { _, w -> done(apps[w].first, apps[w].second) }
+            .setItems(apps.map { it.name }.toTypedArray()) { _, w -> done(apps[w].name, apps[w].id) }
             .setNeutralButton("Digitar ID") { _, _ -> manualApp(done) }
             .show()
     }
