@@ -11,7 +11,11 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
+import java.net.HttpURLConnection
+import java.net.URL
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -48,6 +52,10 @@ class MainActivity : Activity() {
         modeBtn.setOnClickListener {
             if (!ir.available) { status.text = "Este celular não tem infravermelho"; return@setOnClickListener }
             irMode = !irMode; applyMode()
+        }
+        findViewById<Button>(R.id.update).apply {
+            text = "Verificar atualização (versão $myVersion)"
+            setOnClickListener { checkUpdate() }
         }
         renderApps()
         applyMode()
@@ -214,4 +222,36 @@ class MainActivity : Activity() {
     }
 
     private fun toast(t: String) { status.text = t }
+
+    // ---------- Atualização ----------
+
+    private val myVersion: Long get() = packageManager.getPackageInfo(packageName, 0).longVersionCode
+
+    private fun checkUpdate() {
+        status.text = "Verificando atualização…"
+        thread {
+            val latest = runCatching {
+                val c = URL("https://api.github.com/repos/Rafajames/controle-tv-samsung/releases/latest")
+                    .openConnection() as HttpURLConnection
+                c.connectTimeout = 8000; c.readTimeout = 8000
+                c.setRequestProperty("Accept", "application/vnd.github+json")
+                JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+                    .getString("tag_name").removePrefix("v").toLong()
+            }.getOrNull()
+            runOnUiThread {
+                when {
+                    latest == null -> status.text = "Não consegui verificar. Confira a internet"
+                    latest <= myVersion -> status.text = "Você já tem a versão mais nova ($myVersion)"
+                    else -> AlertDialog.Builder(this)
+                        .setTitle("Versão $latest disponível")
+                        .setMessage("Você tem a versão $myVersion. Baixar e instalar por cima?")
+                        .setPositiveButton("Baixar") { _, _ ->
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(
+                                "https://github.com/Rafajames/controle-tv-samsung/releases/download/v$latest/controle-tv.apk")))
+                        }
+                        .setNegativeButton("Agora não", null).show()
+                }
+            }
+        }
+    }
 }

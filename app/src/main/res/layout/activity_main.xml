@@ -73,5 +73,8 @@
             <Button style="@style/Btn" android:tag="KEY_0" android:text="0" />
             <Space style="@style/Gap" />
         </LinearLayout>
+        <Button android:id="@+id/update" android:layout_width="match_parent" android:layout_height="52dp"
+            android:layout_marginTop="16dp" android:background="@drawable/btn" android:textColor="#B0BEC5"
+            android:textSize="14sp" android:textAllCaps="false" android:text="Verificar atualização" />
     </LinearLayout>
 </ScrollView>
